@@ -45,6 +45,7 @@ SRC_SERVICE="${SCRIPT_DIR}/share/systemd/user/sudome-daemon.service"
 SRC_TIMER="${SCRIPT_DIR}/share/systemd/user/sudome-daemon.timer"
 SRC_DESKTOP="${SCRIPT_DIR}/share/applications/sudome.desktop"
 SRC_CONFIG="${SCRIPT_DIR}/etc/sudome/config.yaml"
+SRC_RSYSLOG="${SCRIPT_DIR}/share/rsyslog.d/99-sudome.conf"
 
 # ── Check root ──────────────────────────────────────────────────────────
 require_root() {
@@ -151,6 +152,8 @@ do_install() {
 
     header "Installing SudoMe"
 
+    RSYSLOG_DIR="/etc/rsyslog.d"
+    
     # ── Create directories ──
     info "Creating directories..."
     mkdir -p "$LIB_DIR" "$ETC_DIR" "$STATE_DIR" "$POLKIT_DIR" \
@@ -205,6 +208,22 @@ do_install() {
     else
         warn "Config already exists at ${ETC_DIR}/config.yaml (not overwritten)"
         info "Reference config: ${SRC_CONFIG}"
+    fi
+
+    # ── Install rsyslog forwarding config ──
+    if [[ -d "$RSYSLOG_DIR" ]]; then
+        info "Installing rsyslog forwarding config..."
+        if [[ ! -f "${RSYSLOG_DIR}/99-sudome.conf" ]]; then
+            install -m 644 "$SRC_RSYSLOG" "${RSYSLOG_DIR}/99-sudome.conf"
+            ok "rsyslog config → ${RSYSLOG_DIR}/99-sudome.conf"
+            info "SudoMe events logged to /var/log/sudome.log"
+            info "To forward to a remote syslog server, edit ${RSYSLOG_DIR}/99-sudome.conf"
+        else
+            warn "rsyslog config already exists (not overwritten)"
+        fi
+    else
+        warn "rsyslog not found — skipping syslog forwarding config"
+        info "Install rsyslog for remote syslog support: sudo apt install rsyslog"
     fi
 
     # ── Set state dir permissions ──
