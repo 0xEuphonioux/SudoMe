@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+"""
+SudoMe Daemon — Background service that monitors active sudo grants
+and automatically revokes them when they expire.
+
+Designed to be run by a systemd user timer every 30 seconds.
+"""
+
+import os
+import subprocess
+import sys
+import time
+import json
+from pathlib import Path
+
+STATE_DIR = "/var/lib/sudome"
+HELPER_PATH = "/usr/lib/sudome/sudome-helper"
+LOG_TAG = "sudome-daemon"
+
+
+def log(level: str, message: str):
+    """Write to syslog."""
+    subprocess.run(
+        ["logger", "-t", LOG_TAG, "-p", f"daemon.{level}", message],
+        capture_output=True,
+    )
+
+
+def get_active_grants() -> list[tuple[str, int]]:
+    """Scan state directory for active grants. Returns [(username, expiry_ts), ...]."""
+    if not os.path.isdir(STATE_DIR):
+        return []
+
+    active = []
+    now = int(time.time())
+
+    for fname in os.listdir(STATE_DIR):
+        if not fname.endswith(".expiry"):
+            continue
+        username = fname[:-7]  # strip .expiry
+        fpath = os.path.join(STATE_DIR, fname)
+        try:
+            with open(fpath) as f:
+                expiry = int(f.read().strip())
+            active.append((username, expiry))
+        except (ValueError, OSError):
+            continue
+
+    return active
+
+
+def revoke_expired():
+    """Check all grants and revoke any that have expired."""
+    active = get_active_grants()
+    if not active:
+        return
+
+    now = int(time.time())
+
+    for username, expiry in active:
+        remaining = expiry - now
+
+        if remaining <= 0:
+            # Expired — revoke
+            log("notice", f"Auto-revoking sudo for '{username}' (expired {abs(remaining)}s ago)")
+            try:
+                subprocess.run(
+                    [HELPER_PATH, "revoke", username],
+                    capture_output=True,
+                    timeout=30,
+                )
+                log("info", f"Revoked sudo for '{username}'")
+            except Exception as e:
+                log("err", f"Failed to revoke sudo for '{username}': {e}")
+
+
+def main():
+    """Main daemon loop — runs once per tick (called by systemd timer)."""
+    try:
+        revoke_expired()
+    except Exception as e:
+        log("err", f"Daemon error: {e}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

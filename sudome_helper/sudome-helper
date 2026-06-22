@@ -1,0 +1,137 @@
+#!/bin/bash
+# SudoMe Helper — Polkit-backed privileged operations
+# Called by polkitd when a client requests sudo grant/revoke/status.
+# This script runs as root.
+#
+# Usage:
+#   sudome-helper grant <username> <minutes>
+#   sudome-helper revoke <username>
+#   sudome-helper status <username>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+set -euo pipefail
+
+ACTION="${1:-}"
+USERNAME="${2:-}"
+MINUTES="${3:-}"
+
+# ── Configuration ──────────────────────────────────────────────────────
+SUDO_GROUP="${SUDO_GROUP:-sudo}"
+STATE_DIR="/var/lib/sudome"
+LOG_TAG="sudome-helper"
+
+# ── Logging ────────────────────────────────────────────────────────────
+log() {
+    local level="$1"; shift
+    logger -t "$LOG_TAG" -p "auth.$level" "$*"
+}
+
+# ── Validate username ──────────────────────────────────────────────────
+validate_user() {
+    if ! id "$USERNAME" &>/dev/null; then
+        log err "User '$USERNAME' does not exist"
+        echo "ERROR: User '$USERNAME' does not exist"
+        exit 1
+    fi
+}
+
+# ── Grant sudo ─────────────────────────────────────────────────────────
+cmd_grant() {
+    validate_user
+    local minutes="${MINUTES:-30}"
+
+    # Check if already in sudo group
+    if groups "$USERNAME" | grep -qw "$SUDO_GROUP"; then
+        echo "ALREADY_ACTIVE"
+        log info "User '$USERNAME' already in sudo group"
+        exit 0
+    fi
+
+    # Add to sudo group
+    if usermod -a -G "$SUDO_GROUP" "$USERNAME" 2>/dev/null; then
+        local expiry
+        expiry=$(date -d "+${minutes} minutes" +%s 2>/dev/null || \
+                 python3 -c "import time; print(int(time.time() + ${minutes}*60))")
+
+        # Persist expiry timestamp
+        mkdir -p "$STATE_DIR"
+        echo "$expiry" > "${STATE_DIR}/${USERNAME}.expiry"
+        chmod 600 "${STATE_DIR}/${USERNAME}.expiry"
+
+        # Write syslog audit event (same format as SAP Privileges)
+        local now=$(date '+%m/%d/%Y %I:%M:%S %p')
+        log notice "GRANT: user='$USERNAME' minutes=$minutes expiry=$expiry"
+
+        # Also write structured event to syslog
+        logger -t "$LOG_TAG" -p auth.notice \
+            "Process sudome created at $now by user $USERNAME in session $(loginctl list-sessions --no-legend 2>/dev/null | grep "$USERNAME" | awk '{print $1}' | head -1 || echo '?') with an elevation type of Default. action: 'grant' minutes: '$minutes'"
+
+        echo "GRANTED $minutes $expiry"
+    else
+        log err "Failed to add '$USERNAME' to '$SUDO_GROUP' group"
+        echo "ERROR: Failed to grant sudo access"
+        exit 1
+    fi
+}
+
+# ── Revoke sudo ────────────────────────────────────────────────────────
+cmd_revoke() {
+    validate_user
+
+    # Check if in sudo group
+    if ! groups "$USERNAME" | grep -qw "$SUDO_GROUP"; then
+        echo "NOT_ACTIVE"
+        log info "User '$USERNAME' not in sudo group — nothing to revoke"
+        exit 0
+    fi
+
+    # Remove from sudo group
+    if deluser "$USERNAME" "$SUDO_GROUP" 2>/dev/null || \
+       gpasswd -d "$USERNAME" "$SUDO_GROUP" 2>/dev/null; then
+        rm -f "${STATE_DIR}/${USERNAME}.expiry"
+
+        local now=$(date '+%m/%d/%Y %I:%M:%S %p')
+        log notice "REVOKE: user='$USERNAME'"
+
+        logger -t "$LOG_TAG" -p auth.notice \
+            "Administrator privileges have been revoked for user $USERNAME at $now."
+
+        echo "REVOKED"
+    else
+        log err "Failed to remove '$USERNAME' from '$SUDO_GROUP' group"
+        echo "ERROR: Failed to revoke sudo access"
+        exit 1
+    fi
+}
+
+# ── Check status ───────────────────────────────────────────────────────
+cmd_status() {
+    validate_user
+
+    if groups "$USERNAME" | grep -qw "$SUDO_GROUP"; then
+        if [[ -f "${STATE_DIR}/${USERNAME}.expiry" ]]; then
+            local expiry
+            expiry=$(cat "${STATE_DIR}/${USERNAME}.expiry")
+            local now
+            now=$(date +%s)
+            local remaining=$((expiry - now))
+            echo "ACTIVE $remaining $expiry"
+        else
+            echo "ACTIVE 0 0"
+        fi
+    else
+        echo "NOT_ACTIVE"
+    fi
+}
+
+# ── Main ───────────────────────────────────────────────────────────────
+case "$ACTION" in
+    grant)  cmd_grant ;;
+    revoke) cmd_revoke ;;
+    status) cmd_status ;;
+    *)
+        echo "ERROR: Unknown action '$ACTION'. Use: grant|revoke|status <username> [minutes]"
+        exit 1
+        ;;
+esac

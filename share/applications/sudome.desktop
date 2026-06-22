@@ -1,0 +1,14 @@
+[Desktop Entry]
+Name=SudoMe
+Comment=Temporary sudo privilege elevation
+Comment[de]=Temporäre sudo-Rechteerweiterung
+Comment[es]=Elevación temporal de privilegios sudo
+Comment[fr]=Élévation temporaire des privilèges sudo
+Exec=sudome-gui
+Icon=sudome
+Type=Application
+Categories=System;Security;Utility;
+StartupNotify=true
+X-GNOME-Autostart-enabled=true
+NoDisplay=false
+Terminal=false

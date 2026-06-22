@@ -1,0 +1,45 @@
+# SudoMe Configuration
+# /etc/sudome/config.yaml
+#
+# This file configures the default behavior of SudoMe.
+# These defaults can be overridden by the user in their
+# first session of each grant.
+
+# ── Timing ─────────────────────────────────────────────────────────────
+# Default duration for sudo grants (minutes)
+default_duration: 30
+
+# Maximum allowed duration for a single grant (minutes, 0 = unlimited)
+max_duration: 480
+
+# How often the daemon checks for expired grants (seconds)
+daemon_check_interval: 30
+
+# ── Behavior ───────────────────────────────────────────────────────────
+# Automatically revoke sudo at user logout
+revoke_on_logout: true
+
+# Show desktop notification before expiry (seconds before, 0 = disabled)
+notify_before_expiry: 300
+
+# ── Logging ────────────────────────────────────────────────────────────
+# Log all grant/revoke events to syslog
+log_to_syslog: true
+
+# Syslog facility
+syslog_facility: "auth"
+
+# ── Notifications ──────────────────────────────────────────────────────
+# Enable desktop notifications
+desktop_notifications: true
+
+# ── Webhooks ───────────────────────────────────────────────────────────
+# POST JSON to this URL on grant/revoke events (leave empty to disable)
+# webhook_url: "https://your-siem.example.com/hooks/sudome"
+
+# ── GUI ────────────────────────────────────────────────────────────────
+# Show system tray icon
+show_tray_icon: true
+
+# Show remaining time in tray icon
+show_tray_timer: true

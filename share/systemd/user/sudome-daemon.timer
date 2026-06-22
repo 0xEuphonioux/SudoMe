@@ -1,0 +1,10 @@
+[Unit]
+Description=SudoMe — Check for expired sudo grants
+
+[Timer]
+OnUnitActiveSec=30s
+OnBootSec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

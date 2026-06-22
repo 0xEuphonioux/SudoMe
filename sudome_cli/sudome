@@ -1,0 +1,253 @@
+#!/usr/bin/env python3
+"""
+SudoMe CLI — Temporary sudo elevation for Linux.
+
+Usage:
+    sudome on [minutes]       Grant sudo for N minutes (default: 30)
+    sudome off                Revoke sudo immediately
+    sudome status             Show current sudo status
+    sudome renew [minutes]    Extend the current sudo grant
+
+Examples:
+    sudome on                 # 30 minutes of sudo
+    sudome on 60              # 60 minutes of sudo
+    sudome status             # ACTIVE 25m remaining
+    sudome renew 15           # Extend by 15 minutes
+    sudome off                # Revoke now
+
+SudoMe mirrors SAP Privileges for macOS — temporary admin rights,
+automatic revocation, audit logging, enterprise-ready.
+"""
+
+import argparse
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+VERSION = "1.0.0"
+HELPER_PATH = "/usr/lib/sudome/sudome-helper"
+STATE_DIR = "/var/lib/sudome"
+CONFIG_FILE = "/etc/sudome/config.yaml"
+PKEXEC = "/usr/bin/pkexec"
+
+# ── Terminal colors ────────────────────────────────────────────────────
+class Colors:
+    GREEN = "\033[92m"
+    RED = "\033[91m"
+    YELLOW = "\033[93m"
+    CYAN = "\033[96m"
+    BOLD = "\033[1m"
+    RESET = "\033[0m"
+
+def bold(s):  return f"{Colors.BOLD}{s}{Colors.RESET}"
+def green(s): return f"{Colors.GREEN}{s}{Colors.RESET}"
+def red(s):   return f"{Colors.RED}{s}{Colors.RESET}"
+def yellow(s): return f"{Colors.YELLOW}{s}{Colors.RESET}"
+def cyan(s):  return f"{Colors.CYAN}{s}{Colors.RESET}"
+
+# ── Helpers ────────────────────────────────────────────────────────────
+def run_helper(action: str, minutes: int = 0) -> tuple[int, str]:
+    """Run the Polkit helper, returning (exit_code, output)."""
+    username = os.environ.get("SUDO_USER", os.environ.get("USER", ""))
+    if not username:
+        return 1, "ERROR: Cannot determine username"
+
+    cmd = [PKEXEC, HELPER_PATH, action, username]
+    if action == "grant" and minutes > 0:
+        cmd.append(str(minutes))
+
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=60
+        )
+        return result.returncode, result.stdout.strip() + result.stderr.strip()
+    except subprocess.TimeoutExpired:
+        return 1, "ERROR: Operation timed out"
+    except FileNotFoundError:
+        return 1, "ERROR: pkexec not found. Is PolicyKit installed?"
+
+def get_status() -> tuple[str, int, int]:
+    """Returns (state, remaining_seconds, expiry_timestamp)."""
+    ret, output = run_helper("status")
+    if ret != 0:
+        return "ERROR", 0, 0
+
+    parts = output.split()
+    if not parts:
+        return "NOT_ACTIVE", 0, 0
+
+    state = parts[0]
+    remaining = int(parts[1]) if len(parts) > 1 else 0
+    expiry = int(parts[2]) if len(parts) > 2 else 0
+    return state, remaining, expiry
+
+def format_time(seconds: int) -> str:
+    """Format seconds into human-readable time."""
+    if seconds <= 0:
+        return "expired"
+    m, s = divmod(seconds, 60)
+    h, m = divmod(m, 60)
+    if h > 0:
+        return f"{h}h {m}m"
+    elif m > 0:
+        return f"{m}m {s}s"
+    else:
+        return f"{s}s"
+
+# ── Commands ───────────────────────────────────────────────────────────
+def cmd_status():
+    """Show current sudo status."""
+    state, remaining, expiry = get_status()
+
+    if state == "ACTIVE":
+        print(f"  {green('●')} Sudo is {bold('ACTIVE')}")
+        print(f"    Time remaining: {cyan(format_time(remaining))}")
+        if expiry > 0:
+            expiry_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(expiry))
+            print(f"    Expires at:     {expiry_str}")
+        print()
+        print(f"  Run {bold('sudome off')} to revoke immediately")
+        print(f"  Run {bold('sudome renew')} to extend")
+    elif state == "NOT_ACTIVE":
+        print(f"  {yellow('○')} Sudo is {bold('NOT active')}")
+        print(f"  Run {bold('sudome on')} to request temporary sudo")
+    else:
+        print(f"  {red('✗')} {red(state)}")
+
+def cmd_on(minutes: int = 30):
+    """Request temporary sudo access."""
+    if minutes < 1:
+        print(red("Minutes must be at least 1"))
+        sys.exit(1)
+
+    # Check if already active
+    state, remaining, _ = get_status()
+    if state == "ACTIVE":
+        print(yellow(f"Sudo is already active ({format_time(remaining)} remaining)"))
+        print(f"Run {bold('sudome renew')} to extend, or {bold('sudome off')} to revoke first")
+        sys.exit(0)
+
+    print(f"Requesting sudo for {bold(str(minutes))} minutes...")
+    ret, output = run_helper("grant", minutes)
+
+    if ret == 0 and output.startswith("GRANTED"):
+        parts = output.split()
+        actual_minutes = int(parts[1]) if len(parts) > 1 else minutes
+        expiry_ts = int(parts[2]) if len(parts) > 2 else 0
+
+        print()
+        print(f"  {green('✓')} {bold('Sudo granted!')}")
+        print(f"    Duration:  {cyan(str(actual_minutes))} minutes")
+        if expiry_ts:
+            expiry_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(expiry_ts))
+            print(f"    Expires:   {expiry_str}")
+        print()
+        print(f"  You now have admin privileges. They will be")
+        print(f"  automatically revoked when the timer expires.")
+    elif output == "ALREADY_ACTIVE":
+        print(yellow("Sudo is already active"))
+    else:
+        print(red(f"Failed to grant sudo: {output}"))
+        sys.exit(1)
+
+def cmd_off():
+    """Revoke sudo immediately."""
+    state, remaining, _ = get_status()
+
+    if state != "ACTIVE":
+        print(yellow("Sudo is not currently active"))
+        sys.exit(0)
+
+    if remaining > 0:
+        print(f"Revoking sudo ({format_time(remaining)} remaining)...")
+    else:
+        print("Revoking sudo...")
+
+    ret, output = run_helper("revoke")
+
+    if ret == 0 and "REVOKED" in output:
+        print(f"  {green('✓')} {bold('Sudo revoked')}")
+        print(f"  You are now back to standard user privileges.")
+    elif "NOT_ACTIVE" in output:
+        print(yellow("Sudo was not active"))
+    else:
+        print(red(f"Failed to revoke sudo: {output}"))
+        sys.exit(1)
+
+def cmd_renew(minutes: int = 30):
+    """Extend current sudo grant."""
+    state, remaining, expiry = get_status()
+
+    if state != "ACTIVE":
+        print(yellow("Sudo is not currently active"))
+        print(f"Run {bold('sudome on')} to request sudo first")
+        sys.exit(1)
+
+    print(f"Extending sudo by {bold(str(minutes))} more minutes...")
+    ret, output = run_helper("grant", minutes)
+
+    if ret == 0 and output.startswith("GRANTED"):
+        parts = output.split()
+        new_expiry = int(parts[2]) if len(parts) > 2 else 0
+        print()
+        print(f"  {green('✓')} {bold('Sudo extended!')}")
+        if new_expiry:
+            expiry_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(new_expiry))
+            print(f"    New expiry: {expiry_str}")
+    else:
+        print(red(f"Failed to extend: {output}"))
+        sys.exit(1)
+
+# ── Main ───────────────────────────────────────────────────────────────
+def main():
+    parser = argparse.ArgumentParser(
+        description="SudoMe — Temporary sudo privilege elevation",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  sudome on              Grant sudo for 30 minutes
+  sudome on 60           Grant sudo for 60 minutes  
+  sudome status          Check current status
+  sudome renew           Extend by 30 minutes
+  sudome renew 15        Extend by 15 minutes
+  sudome off             Revoke immediately
+        """
+    )
+    parser.add_argument("--version", action="version", version=f"SudoMe v{VERSION}")
+
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # sudome on [minutes]
+    on_parser = subparsers.add_parser("on", help="Grant temporary sudo access")
+    on_parser.add_argument("minutes", nargs="?", type=int, default=30,
+                          help="Duration in minutes (default: 30)")
+
+    # sudome off
+    subparsers.add_parser("off", help="Revoke temporary sudo access")
+
+    # sudome status
+    subparsers.add_parser("status", aliases=["st"], help="Show current sudo status")
+
+    # sudome renew [minutes]
+    renew_parser = subparsers.add_parser("renew", help="Extend current sudo grant")
+    renew_parser.add_argument("minutes", nargs="?", type=int, default=30,
+                             help="Additional minutes (default: 30)")
+
+    args = parser.parse_args()
+
+    if not args.command:
+        # Default: show status
+        cmd_status()
+    elif args.command == "on":
+        cmd_on(args.minutes)
+    elif args.command == "off":
+        cmd_off()
+    elif args.command in ("status", "st"):
+        cmd_status()
+    elif args.command == "renew":
+        cmd_renew(args.minutes)
+
+if __name__ == "__main__":
+    main()

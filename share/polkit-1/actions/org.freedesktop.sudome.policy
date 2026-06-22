@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+
+<!--
+  SudoMe — Temporary sudo privilege elevation for Linux
+  Polkit action definitions for adding/removing users from the sudo group
+  
+  Copyright 2026 0xEuphonioux
+  SPDX-License-Identifier: Apache-2.0
+-->
+
+<policyconfig>
+  <vendor>SudoMe</vendor>
+  <vendor_url>https://github.com/0xEuphonioux/SudoMe</vendor_url>
+  <icon_name>sudome</icon_name>
+
+  <!-- Grant sudo (add user to sudo group) -->
+  <action id="org.freedesktop.sudome.grant">
+    <description>Grant temporary sudo access</description>
+    <description xml:lang="de">Temporären sudo-Zugriff gewähren</description>
+    <description xml:lang="es">Conceder acceso sudo temporal</description>
+    <description xml:lang="fr">Accorder un accès sudo temporaire</description>
+    <message>Authentication is required to grant temporary sudo access</message>
+    <message xml:lang="de">Authentifizierung erforderlich, um temporären sudo-Zugriff zu gewähren</message>
+    <message xml:lang="es">Se requiere autenticación para conceder acceso sudo temporal</message>
+    <message xml:lang="fr">Authentification requise pour accorder un accès sudo temporaire</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/sudome/sudome-helper</annotate>
+  </action>
+
+  <!-- Revoke sudo (remove user from sudo group) -->
+  <action id="org.freedesktop.sudome.revoke">
+    <description>Revoke temporary sudo access</description>
+    <description xml:lang="de">Temporären sudo-Zugriff entziehen</description>
+    <description xml:lang="es">Revocar acceso sudo temporal</description>
+    <description xml:lang="fr">Révoquer l'accès sudo temporaire</description>
+    <message>Authentication is required to revoke temporary sudo access</message>
+    <message xml:lang="de">Authentifizierung erforderlich, um temporären sudo-Zugriff zu entziehen</message>
+    <message xml:lang="es">Se requiere autenticación para revocar acceso sudo temporal</message>
+    <message xml:lang="fr">Authentification requise pour révoquer l'accès sudo temporaire</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/sudome/sudome-helper</annotate>
+  </action>
+
+  <!-- Check sudo status -->
+  <action id="org.freedesktop.sudome.status">
+    <description>Check temporary sudo access status</description>
+    <description xml:lang="de">Status des temporären sudo-Zugriffs prüfen</description>
+    <description xml:lang="es">Verificar estado del acceso sudo temporal</description>
+    <description xml:lang="fr">Vérifier le statut de l'accès sudo temporaire</description>
+    <message>Authentication is not required to check sudo status</message>
+    <defaults>
+      <allow_any>yes</allow_any>
+      <allow_inactive>yes</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/sudome/sudome-helper</annotate>
+  </action>
+</policyconfig>
