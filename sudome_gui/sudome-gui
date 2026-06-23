@@ -356,7 +356,8 @@ class SudoMeTrayApp:
             label = "Requesting"
             if self._is_reason_required():
                 reason = self._prompt_reason()
-                if reason is None:  # User cancelled
+                if reason is None:  # User cancelled or validation failed
+                    self._notify("SudoMe", "Elevation cancelled — no reason provided.", "normal")
                     return
 
         self._notify("SudoMe", f"{label} sudo for {self.default_minutes} minutes...")

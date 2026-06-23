@@ -58,15 +58,11 @@ def run_helper(action: str, minutes: int = 0, reason: str = "") -> tuple[int, st
         username = pwd.getpwuid(os.getuid()).pw_name
 
     cmd = [PKEXEC, HELPER_PATH, action, username]
-    if action == "grant" and minutes > 0:
+    if action in ("grant", "renew") and minutes > 0:
         cmd.append(str(minutes))
         if reason:
             cmd.append(reason)
     elif action == "revoke" and reason:
-        cmd.append(reason)
-    elif action == "grant" and reason and minutes == 0:
-        # minutes wasn't specified but reason was
-        cmd.append("30")
         cmd.append(reason)
 
     try:
@@ -86,14 +82,12 @@ def get_status() -> tuple[str, int, int]:
     pkexec for 'status' was matching the grant action (auth_self)
     and causing a spurious auth prompt.
     """
-    # Use getpwuid for trusted username
     import pwd
     try:
         username = os.getlogin()
     except OSError:
         username = pwd.getpwuid(os.getuid()).pw_name
     
-    # Check if user is in sudo group
     try:
         result = subprocess.run(
             ["groups", username],
@@ -106,7 +100,6 @@ def get_status() -> tuple[str, int, int]:
     if not in_sudo:
         return "NOT_ACTIVE", 0, 0
     
-    # Read expiry timestamp from state file
     state_file = f"/var/lib/sudome/{username}.expiry"
     try:
         with open(state_file) as f:
@@ -118,6 +111,71 @@ def get_status() -> tuple[str, int, int]:
         return "ACTIVE", remaining, expiry
     except (PermissionError, FileNotFoundError, ValueError):
         return "ACTIVE_UNKNOWN", 0, 0
+
+def _get_reason_config():
+    """Read reason enforcement config. Returns (require, presets, min_len, strict)."""
+    try:
+        import yaml
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE) as f:
+                config = yaml.safe_load(f) or {}
+            return (
+                config.get("require_reason", False),
+                config.get("reason_presets", []),
+                config.get("reason_min_length", 0),
+                config.get("reason_strict_presets", False),
+            )
+    except Exception:
+        pass
+    return False, [], 0, False
+
+def _prompt_reason():
+    """Interactively prompt user for reason. Returns reason string or exits."""
+    require_reason, presets, min_len, strict = _get_reason_config()
+    if not require_reason:
+        return ""
+    
+    reason = ""
+    print()
+    print(f"  {bold('Reason required')} for requesting administrator privileges:")
+    
+    if presets:
+        print()
+        for i, preset in enumerate(presets, 1):
+            print(f"    {bold(f'[{i}]')} {preset}")
+        if not strict:
+            print(f"    {bold('[0]')} Enter custom reason")
+        print()
+        try:
+            choice = input(f"  Select [{cyan('1')}-{cyan(str(len(presets)))}]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            sys.exit(0)
+        if choice.isdigit():
+            idx = int(choice)
+            if 1 <= idx <= len(presets):
+                reason = presets[idx - 1]
+        if not reason:
+            if strict:
+                print(red("Invalid selection"))
+                sys.exit(1)
+            # fall through to custom input
+    
+    if not reason:
+        try:
+            reason = input(f"  Enter reason: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            sys.exit(0)
+    
+    if not reason:
+        print(red("Reason cannot be empty"))
+        sys.exit(1)
+    if min_len > 0 and len(reason) < min_len:
+        print(red(f"Reason must be at least {min_len} characters (got {len(reason)})"))
+        sys.exit(1)
+    
+    return reason
 
 def format_time(seconds: int) -> str:
     """Format seconds into human-readable time."""
@@ -149,10 +207,6 @@ def cmd_status():
     elif state == "NOT_ACTIVE":
         print(f"  {yellow('○')} Sudo is {bold('NOT active')}")
         print(f"  Run {bold('sudome on')} to request temporary sudo")
-    elif state == "ACTIVE_UNKNOWN":
-        print(f"  {green('●')} Sudo is {bold('ACTIVE')} (expiry unknown)")
-        print(f"  Run {bold('sudome off')} to revoke immediately")
-        print(f"  Run {bold('sudome renew')} to extend")
     else:
         print(f"  {red('✗')} {red(state)}")
 
@@ -161,6 +215,10 @@ def cmd_on(minutes: int = 30, reason: str = ""):
     if minutes < 1:
         print(red("Minutes must be at least 1"))
         sys.exit(1)
+
+    # Collect reason BEFORE auth (reason first, then pkexec auth prompt)
+    if not reason:
+        reason = _prompt_reason()
 
     # Check if already active
     state, remaining, _ = get_status()
@@ -172,6 +230,8 @@ def cmd_on(minutes: int = 30, reason: str = ""):
     print(f"Requesting sudo for {bold(str(minutes))} minutes...")
     if reason:
         print(f"  Reason: {reason}")
+    
+    # pkexec runs here — this triggers the Polkit auth dialog
     ret, output = run_helper("grant", minutes, reason)
 
     if ret == 0 and output.startswith("GRANTED"):
