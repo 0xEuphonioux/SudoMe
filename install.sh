@@ -362,6 +362,15 @@ do_install() {
     info "Reloading D-Bus..."
     systemctl reload dbus 2>/dev/null || service dbus reload 2>/dev/null || true
 
+    # ── Launch system tray (full mode only) ──
+    if [[ "$INSTALL_MODE" == "full" ]]; then
+        if [[ "$REAL_USER" != "root" ]]; then
+            info "Launching system tray for user '$REAL_USER'..."
+            su - "$REAL_USER" -c "nohup sudome-gui > /dev/null 2>&1 &" 2>/dev/null || true
+            ok "System tray started"
+        fi
+    fi
+
     # ── Done ──
     echo
     echo -e "  [OK] Polkit policy registered"
