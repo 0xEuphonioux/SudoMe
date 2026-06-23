@@ -6,10 +6,15 @@ or the expiry timer runs out. Mirrors SAP Privileges revocation behavior.
 
 Monitored events:
   - Session lock (logind Lock signal)        → revoke
-  - System sleep (logind PrepareForSleep)     → revoke  
+  - System sleep (logind PrepareForSleep)     → revoke
   - Time/date change (timedated)              → revoke
   - Shutdown (SIGTERM handler)               → revoke all
   - Timer expiry (internal 10s check)         → revoke
+
+Enterprise features:
+  - Excluded users (service accounts immune to auto-revoke)
+  - Proactive renewal notification before expiry
+  - Config-driven via /etc/sudome/config.yaml
 
 Runs as a systemd user service (long-running, not oneshot).
 """
@@ -20,6 +25,12 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+
+try:
+    import yaml
+    HAS_YAML = True
+except ImportError:
+    HAS_YAML = False
 
 try:
     import gi
@@ -38,11 +49,54 @@ except ImportError:
     HAS_DBUS = False
 
 STATE_DIR = "/var/lib/sudome"
+CONFIG_FILE = "/etc/sudome/config.yaml"
 HELPER_PATH = "/usr/lib/sudome/sudome-helper"
 HELPER_REVOKE_PATH = "/usr/lib/sudome/sudome-helper-revoke"
 PKEXEC = "/usr/bin/pkexec"
 LOG_TAG = "sudome-daemon"
 CHECK_INTERVAL = 10  # seconds between expiry checks
+
+# ── Configuration ──────────────────────────────────────────────────────
+_config = None
+_config_loaded = False
+
+def load_config():
+    """Load configuration from /etc/sudome/config.yaml."""
+    global _config, _config_loaded
+    if _config_loaded:
+        return _config
+    _config = {}
+    if HAS_YAML and os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE) as f:
+                _config = yaml.safe_load(f) or {}
+        except Exception:
+            pass
+    _config_loaded = True
+    return _config
+
+def get_excluded_users():
+    """Get list of users excluded from auto-revocation."""
+    cfg = load_config()
+    excluded = cfg.get("auto_revoke_excluded_users", [])
+    if isinstance(excluded, list):
+        return [u for u in excluded if isinstance(u, str)]
+    return []
+
+def get_renewal_interval():
+    """Get renewal notification interval (seconds before expiry)."""
+    cfg = load_config()
+    return int(cfg.get("renewal_notification_interval", 60))
+
+def get_notify_before():
+    """Get expiry warning notification time (seconds before expiry)."""
+    cfg = load_config()
+    return int(cfg.get("notify_before_expiry", 300))
+
+def is_renewal_allowed():
+    """Check if privilege renewal is allowed."""
+    cfg = load_config()
+    return bool(cfg.get("allow_privilege_renewal", True))
 
 # ── Logging ────────────────────────────────────────────────────────────
 def log(level: str, message: str):
@@ -52,9 +106,47 @@ def log(level: str, message: str):
         capture_output=True,
     )
 
+# ── Notifications ──────────────────────────────────────────────────────
+_notified_users = {}  # user -> last expiry ts notified about
+
+def send_notification(username: str, title: str, message: str, urgency: str = "normal"):
+    """Send desktop notification to a user."""
+    try:
+        uid = None
+        result = subprocess.run(["id", "-u", username], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            uid = result.stdout.strip()
+        if not uid:
+            return
+        
+        urg_val = "2" if urgency == "critical" else "1"
+        bus_path = f"/run/user/{uid}/bus"
+        if not os.path.exists(bus_path):
+            return
+        
+        env = os.environ.copy()
+        env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={bus_path}"
+        subprocess.run(
+            ["gdbus", "call", "--session",
+             "--dest", "org.freedesktop.Notifications",
+             "--object-path", "/org/freedesktop/Notifications",
+             "--method", "org.freedesktop.Notifications.Notify",
+             "sudome", "0", "sudome", title, message,
+             "[]", "{'urgency': <" + urg_val + ">}", "-1"],
+            capture_output=True, timeout=10,
+            env=env
+        )
+    except Exception:
+        pass  # Notifications are non-critical
+
 # ── Revocation ─────────────────────────────────────────────────────────
 def revoke_user(username: str, reason: str = "auto-revoked by daemon"):
     """Revoke sudo for a specific user via pkexec (Polkit-authorized)."""
+    excluded = get_excluded_users()
+    if username in excluded:
+        log("info", f"Skipping auto-revoke for excluded user '{username}' ({reason})")
+        return True
+
     try:
         result = subprocess.run(
             [PKEXEC, HELPER_REVOKE_PATH, "revoke", username, reason],
@@ -62,6 +154,8 @@ def revoke_user(username: str, reason: str = "auto-revoked by daemon"):
         )
         if "REVOKED" in result.stdout or "NOT_ACTIVE" in result.stdout:
             log("info", f"Revoked sudo for '{username}': {reason}")
+            # Clear notification tracking
+            _notified_users.pop(username, None)
             return True
         else:
             log("err", f"Failed to revoke '{username}': {result.stdout.strip()}")
@@ -75,33 +169,49 @@ def revoke_all_active(reason: str = "auto-revoked by daemon"):
     if not os.path.isdir(STATE_DIR):
         return
     
-    now = int(time.time())
+    excluded = get_excluded_users()
     for fname in os.listdir(STATE_DIR):
         if not fname.endswith(".expiry"):
             continue
         username = fname[:-7]
+        if username in excluded:
+            log("info", f"Skipping auto-revoke for excluded user '{username}' ({reason})")
+            continue
         revoke_user(username, reason)
 
 def get_active_usernames() -> list:
-    """Get list of users with active sudo grants (in sudo group)."""
+    """Get list of users with active sudo grants with expiry files."""
     if not os.path.isdir(STATE_DIR):
         return []
     users = []
     for fname in os.listdir(STATE_DIR):
         if fname.endswith(".expiry"):
-            users.append(fname[:-7])
+            username = fname[:-7]
+            if username not in get_excluded_users():
+                users.append(username)
     return users
 
 def check_expired():
-    """Check all grants and revoke any that have expired."""
+    """Check all grants and revoke any that have expired.
+    Also handles renewal notification for grants about to expire."""
     if not os.path.isdir(STATE_DIR):
         return
     
     now = int(time.time())
+    notify_before = get_notify_before()
+    renewal_interval = get_renewal_interval()
+    renewal_allowed = is_renewal_allowed()
+    excluded = get_excluded_users()
+    
     for fname in os.listdir(STATE_DIR):
         if not fname.endswith(".expiry"):
             continue
         username = fname[:-7]
+        
+        # Skip excluded users
+        if username in excluded:
+            continue
+        
         fpath = os.path.join(STATE_DIR, fname)
         try:
             with open(fpath) as f:
@@ -109,9 +219,41 @@ def check_expired():
         except (ValueError, OSError):
             continue
         
+        # Timer expired → revoke
         if expiry <= now:
             log("notice", f"Timer expired for '{username}'")
             revoke_user(username, "timer expired")
+            continue
+        
+        remaining = expiry - now
+        
+        # Proactive expiry warning (5 minutes before)
+        if notify_before > 0 and remaining <= notify_before:
+            last_notified = _notified_users.get(username, 0)
+            # Only notify once per expiry cycle
+            if expiry != last_notified:
+                mins = remaining // 60
+                secs = remaining % 60
+                send_notification(
+                    username,
+                    "Sudo Expiring Soon",
+                    f"Your administrator privileges expire in {mins}m {secs}s.",
+                    "normal"
+                )
+                _notified_users[username] = expiry
+        
+        # Renewal notification (60s before expiry)
+        if renewal_allowed and renewal_interval > 0 and remaining <= renewal_interval:
+            last_notified = _notified_users.get(username, 0)
+            if expiry != last_notified:
+                send_notification(
+                    username,
+                    "SudoMe — Renew Privileges?",
+                    f"Your sudo access expires in {remaining} seconds. "
+                    f"Run 'sudome renew' or click Extend Sudo to renew.",
+                    "critical"
+                )
+                _notified_users[username] = expiry
 
 # ── Event handlers ─────────────────────────────────────────────────────
 def on_session_lock(locked: bool):
@@ -162,7 +304,6 @@ def setup_dbus_listeners(loop):
         
         # ── Session Lock/Unlock ──────────────────────────────────────
         try:
-            # Get the current session ID
             session_id = os.environ.get("XDG_SESSION_ID", "")
             if session_id:
                 session_path = f"/org/freedesktop/login1/session/{session_id}"
@@ -187,19 +328,6 @@ def setup_dbus_listeners(loop):
         except Exception as e:
             log("warn", f"Could not connect to PrepareForSleep signal: {e}")
         
-        # ── Time/date change ─────────────────────────────────────────
-        try:
-            # Listen for PropertiesChanged on timedate1
-            timedated_proxy = bus.get_object(
-                "org.freedesktop.timedate1",
-                "/org/freedesktop/timedate1"
-            )
-            # Actually, timedate1 doesn't emit signals for time changes.
-            # We'll poll instead. But PropertiesChanged on login1 does fire.
-            log("info", "Time change monitoring: polling-based (10s check)")
-        except Exception as e:
-            log("warn", f"Could not connect to timedate1: {e}")
-        
         return bus
         
     except Exception as e:
@@ -209,9 +337,11 @@ def setup_dbus_listeners(loop):
 # ── Main ───────────────────────────────────────────────────────────────
 def main():
     log("info", "SudoMe daemon starting")
+    excluded = get_excluded_users()
+    if excluded:
+        log("info", f"Auto-revoke excluded users: {', '.join(excluded)}")
     
-    # Revoke any orphaned grants from before daemon started
-    # (e.g., user granted sudo but daemon wasn't running yet)
+    # Revoke any orphaned expired grants
     check_expired()
     
     if not HAS_GLIB:
@@ -237,7 +367,7 @@ def main():
     # Periodic expiry check (every CHECK_INTERVAL seconds)
     def periodic_check():
         check_expired()
-        return True  # keep the timer alive
+        return True
     
     GLib.timeout_add_seconds(CHECK_INTERVAL, periodic_check)
     

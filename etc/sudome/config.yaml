@@ -1,9 +1,9 @@
 # SudoMe Configuration
 # /etc/sudome/config.yaml
 #
-# This file configures the default behavior of SudoMe.
-# These defaults can be overridden by the user in their
-# first session of each grant.
+# Enterprise configuration for SudoMe — temporary sudo privilege
+# elevation with automatic revocation, audit logging, and SIEM integration.
+# Mirrors SAP Privileges configuration profile capabilities.
 
 # ── Timing ─────────────────────────────────────────────────────────────
 # Default duration for sudo grants (minutes)
@@ -14,6 +14,15 @@ max_duration: 480
 
 # How often the daemon checks for expired grants (seconds)
 daemon_check_interval: 30
+
+# ── Auto-Revocation Exclusions ─────────────────────────────────────────
+# Users excluded from ALL automatic revocation (service accounts,
+# emergency admin accounts, backup operators). These users will
+# never have their sudo auto-revoked by lock/sleep/time/shutdown.
+# auto_revoke_excluded_users:
+#   - svc_backup
+#   - svc_ci_runner
+#   - emergency_admin
 
 # ── Behavior ───────────────────────────────────────────────────────────
 # Automatically revoke sudo at user logout
@@ -31,11 +40,58 @@ revoke_on_time_change: true
 # Automatically revoke sudo on shutdown/restart
 revoke_on_shutdown: true
 
-# Prompt user for reason when requesting sudo (enforced via CLI)
+# ── Reason Enforcement ─────────────────────────────────────────────────
+# Require a reason for every sudo elevation
 require_reason: false
 
-# Show desktop notification before expiry (seconds before, 0 = disabled)
-notify_before_expiry: 300
+# Minimum reason length (characters) when required
+reason_min_length: 10
+
+# Maximum reason length (characters)
+reason_max_length: 256
+
+# Preset reason list (if set, user must pick from these)
+# reason_presets:
+#   - "Installing software"
+#   - "System configuration change"
+#   - "Troubleshooting"
+#   - "Security audit"
+
+# Enforce preset list strictly (user cannot type custom reason)
+reason_strict_presets: false
+
+# ── Post-Change Actions ────────────────────────────────────────────────
+# Path to executable/script run after every grant or revoke.
+# Receives arguments: <action:grant|revoke> <username> <minutes> [reason]
+# post_change_executable: "/usr/local/bin/sudome-post-action.sh"
+
+# Expected SHA-256 checksum of the post-change executable (hex).
+# If set, the executable is verified before each invocation.
+# post_change_executable_checksum: "abc123..."
+
+# Only run the post-change action on grant (not on revoke)
+post_change_action_on_grant_only: false
+
+# Pass reason text as final argument to the executable
+pass_reason_to_executable: true
+
+# ── Webhooks ───────────────────────────────────────────────────────────
+# POST JSON to this URL on grant/revoke events (leave empty to disable)
+# webhook_url: "https://siem.example.com/api/v1/events/sudome"
+
+# Custom JSON data to include in the webhook payload
+# webhook_custom_data:
+#   environment: "production"
+#   datacenter: "us-east-1"
+
+# Queue events when webhook server is unreachable (retry on next event)
+webhook_queue_unsent: true
+
+# Maximum number of queued events
+webhook_queue_max: 100
+
+# Webhook request timeout (seconds)
+webhook_timeout: 10
 
 # ── Logging ────────────────────────────────────────────────────────────
 # Log all grant/revoke events to syslog
@@ -48,9 +104,17 @@ syslog_facility: "auth"
 # Enable desktop notifications
 desktop_notifications: true
 
-# ── Webhooks ───────────────────────────────────────────────────────────
-# POST JSON to this URL on grant/revoke events (leave empty to disable)
-# webhook_url: "https://your-siem.example.com/hooks/sudome"
+# Show desktop notification before expiry (seconds before, 0 = disabled)
+notify_before_expiry: 300
+
+# Renewal notification interval (seconds before expiry to show renew prompt)
+renewal_notification_interval: 60
+
+# Allow expiring privileges to be renewed
+allow_privilege_renewal: true
+
+# Require authentication when renewing (mirrors grant auth requirement)
+renewal_follows_auth_setting: true
 
 # ── GUI ────────────────────────────────────────────────────────────────
 # Show system tray icon

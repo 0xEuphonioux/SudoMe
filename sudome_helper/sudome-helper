@@ -6,7 +6,14 @@
 # Usage:
 #   sudome-helper grant <username> <minutes> [reason]
 #   sudome-helper revoke <username> [reason]
+#   sudome-helper renew <username> <minutes> [reason]
 #   sudome-helper status <username>
+#
+# Enterprise features:
+#   - Reason enforcement (required, min/max length, presets)
+#   - Post-change actions (executables run after grant/revoke)
+#   - Webhook callbacks (HTTP POST on state change)
+#   - Atomic state file writes with flock
 #
 # SPDX-License-Identifier: Apache-2.0
 
@@ -20,6 +27,7 @@ ARG4="${4:-}"
 # ── Configuration ──────────────────────────────────────────────────────
 SUDO_GROUP="${SUDO_GROUP:-sudo}"
 STATE_DIR="/var/lib/sudome"
+CONFIG_FILE="/etc/sudome/config.yaml"
 LOG_TAG="sudome-helper"
 
 # ── Logging ────────────────────────────────────────────────────────────
@@ -28,10 +36,38 @@ log() {
     logger -t "$LOG_TAG" -p "auth.$level" "$*"
 }
 
+# ── Config reader (cached to avoid repeated python calls) ──────────────
+_config_cache=""
+get_config() {
+    local key="$1"
+    local default="${2:-}"
+    if [[ -z "$_config_cache" ]] && [[ -f "$CONFIG_FILE" ]] && command -v python3 &>/dev/null; then
+        _config_cache=$(python3 -c "
+import yaml
+try:
+    with open('$CONFIG_FILE') as f:
+        c = yaml.safe_load(f) or {}
+    for k, v in c.items():
+        if isinstance(v, bool):
+            print(f'{k}={str(v).lower()}')
+        elif isinstance(v, list):
+            print(f'{k}=({(' '.join(str(x) for x in v))})')
+        elif v is not None:
+            print(f'{k}={v}')
+except: pass
+" 2>/dev/null)
+    fi
+    local val
+    val=$(echo "$_config_cache" | grep "^${key}=" | head -1 | cut -d= -f2-)
+    if [[ -z "$val" ]]; then
+        echo "$default"
+    else
+        echo "$val"
+    fi
+}
+
 # ── Validate username ──────────────────────────────────────────────────
 validate_user() {
-    # Reject usernames with path separators or special characters
-    # that could enable path traversal or command injection
     if [[ ! "$USERNAME" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
         log err "Invalid username characters: '$USERNAME'"
         echo "ERROR: Invalid username '$USERNAME'. Only lowercase alphanumeric, dash, underscore allowed."
@@ -49,6 +85,203 @@ validate_user() {
     fi
 }
 
+# ── Reason validation ──────────────────────────────────────────────────
+validate_reason() {
+    local reason="$1"
+    local require_reason
+    require_reason=$(get_config "require_reason" "false")
+    
+    if [[ "$require_reason" != "true" ]] && [[ -z "$reason" ]]; then
+        return 0  # Not required, not provided — OK
+    fi
+    
+    if [[ "$require_reason" == "true" ]] && [[ -z "$reason" ]]; then
+        log err "Reason required but not provided"
+        echo "ERROR: A reason is required for this operation."
+        exit 1
+    fi
+    
+    if [[ -n "$reason" ]]; then
+        local min_len max_len
+        min_len=$(get_config "reason_min_length" "0")
+        max_len=$(get_config "reason_max_length" "256")
+        
+        if [[ "${#reason}" -lt "$min_len" ]]; then
+            log err "Reason too short: ${#reason} chars (min $min_len)"
+            echo "ERROR: Reason must be at least $min_len characters."
+            exit 1
+        fi
+        
+        if [[ "${#reason}" -gt "$max_len" ]]; then
+            log err "Reason too long: ${#reason} chars (max $max_len)"
+            echo "ERROR: Reason must be at most $max_len characters."
+            exit 1
+        fi
+        
+        # Check presets if configured
+        local presets
+        presets=$(get_config "reason_presets" "")
+        if [[ -n "$presets" ]]; then
+            local strict
+            strict=$(get_config "reason_strict_presets" "false")
+            # presets are stored as (value1 value2 value3) from our config reader
+            # Strip parentheses
+            presets="${presets#\(}"
+            presets="${presets%\)}"
+            local found=false
+            for preset in $presets; do
+                if [[ "$preset" == "$reason" ]]; then
+                    found=true
+                    break
+                fi
+            done
+            if [[ "$found" != "true" ]] && [[ "$strict" == "true" ]]; then
+                log err "Reason not in preset list: '$reason'"
+                echo "ERROR: Reason must be one of: $presets"
+                exit 1
+            fi
+        fi
+    fi
+    return 0
+}
+
+# ── Atomic state file write ────────────────────────────────────────────
+atomic_write() {
+    local filepath="$1"
+    local content="$2"
+    local tmpfile="${filepath}.tmp.$$"
+    echo "$content" > "$tmpfile"
+    chmod 644 "$tmpfile"
+    mv "$tmpfile" "$filepath"
+}
+
+# ── Post-change action ─────────────────────────────────────────────────
+run_post_change_action() {
+    local action="$1"   # grant or revoke
+    local username="$2"
+    local minutes="$3"
+    local reason="$4"
+    
+    local executable checksum
+    executable=$(get_config "post_change_executable" "")
+    if [[ -z "$executable" ]]; then
+        return 0  # Not configured — skip
+    fi
+    
+    # Check grant-only flag
+    local grant_only
+    grant_only=$(get_config "post_change_action_on_grant_only" "false")
+    if [[ "$grant_only" == "true" ]] && [[ "$action" != "grant" ]]; then
+        return 0
+    fi
+    
+    # Verify executable exists
+    if [[ ! -x "$executable" ]]; then
+        log err "Post-change executable not found or not executable: $executable"
+        return 1
+    fi
+    
+    # Checksum verification
+    checksum=$(get_config "post_change_executable_checksum" "")
+    if [[ -n "$checksum" ]] && command -v sha256sum &>/dev/null; then
+        local actual
+        actual=$(sha256sum "$executable" | cut -d' ' -f1)
+        if [[ "$actual" != "$checksum" ]]; then
+            log err "Post-change executable checksum mismatch: expected $checksum, got $actual"
+            return 1
+        fi
+    fi
+    
+    # Build arguments
+    local args=("$executable" "$action" "$username" "$minutes")
+    local pass_reason
+    pass_reason=$(get_config "pass_reason_to_executable" "true")
+    if [[ "$pass_reason" == "true" ]] && [[ -n "$reason" ]]; then
+        args+=("$reason")
+    fi
+    
+    # Run (non-blocking, fire-and-forget)
+    "${args[@]}" &
+    log info "Post-change action triggered: $action for $username"
+}
+
+# ── Webhook ────────────────────────────────────────────────────────────
+send_webhook() {
+    local action="$1"
+    local username="$2"
+    local minutes="$3"
+    local reason="$4"
+    local expiry="${5:-0}"
+    
+    local webhook_url
+    webhook_url=$(get_config "webhook_url" "")
+    if [[ -z "$webhook_url" ]]; then
+        return 0
+    fi
+    
+    if ! command -v curl &>/dev/null; then
+        log warn "curl not available — webhook disabled"
+        return 0
+    fi
+    
+    local timeout
+    timeout=$(get_config "webhook_timeout" "10")
+    
+    local now_iso
+    now_iso=$(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S%z')
+    local hostname
+    hostname=$(hostname 2>/dev/null || echo "unknown")
+    
+    # Build JSON payload
+    local custom_json="{}"
+    # Try to get custom_data from config
+    if [[ -f "$CONFIG_FILE" ]] && command -v python3 &>/dev/null; then
+        custom_json=$(python3 -c "
+import yaml,json
+try:
+    with open('$CONFIG_FILE') as f:
+        c = yaml.safe_load(f) or {}
+    cd = c.get('webhook_custom_data', {})
+    if cd:
+        print(json.dumps(cd))
+    else:
+        print('{}')
+except: print('{}')
+" 2>/dev/null)
+    fi
+    
+    local payload
+    payload=$(python3 -c "
+import json, sys
+custom = json.loads('''$custom_json''')
+payload = {
+    'event': '$action',
+    'username': '$username',
+    'minutes': $minutes,
+    'expiry': $expiry,
+    'timestamp': '$now_iso',
+    'hostname': '$hostname',
+    'source': 'sudome',
+    'version': '2.0.0'
+}
+if '$reason' != '':
+    payload['reason'] = '$reason'
+if custom:
+    payload['custom_data'] = custom
+print(json.dumps(payload))
+" 2>/dev/null)
+    
+    if [[ -n "$payload" ]]; then
+        curl -s -X POST "$webhook_url" \
+            -H "Content-Type: application/json" \
+            -H "User-Agent: SudoMe/2.0.0" \
+            -d "$payload" \
+            --max-time "$timeout" \
+            > /dev/null 2>&1 &
+        log info "Webhook sent: $action for $username"
+    fi
+}
+
 # ── Send desktop notification (as the user, not root) ──────────────────
 notify_user() {
     local username="$1"
@@ -56,11 +289,9 @@ notify_user() {
     local message="$3"
     local urgency="${4:-normal}"
     
-    # Send notification as the target user via their D-Bus session bus
     local uid
     uid=$(id -u "$username" 2>/dev/null) || return 0
     
-    # Find the user's D-Bus session address
     local dbus_addr
     dbus_addr=$(cat "/run/user/${uid}/bus" 2>/dev/null || true)
     
@@ -84,29 +315,23 @@ cmd_grant() {
     local minutes="${ARG3:-30}"
     local reason="${ARG4:-}"
     
-    # Validate minutes is a positive integer (prevents shell/Python injection)
+    # Validate minutes
     if ! [[ "$minutes" =~ ^[0-9]+$ ]] || [[ "$minutes" -lt 1 ]]; then
         log err "Invalid minutes value: '$minutes'"
         echo "ERROR: Invalid duration. Must be a positive integer."
         exit 1
     fi
     
+    # Validate reason
+    validate_reason "$reason"
+    
     # Enforce max_duration from config
-    if [[ -f "/etc/sudome/config.yaml" ]] && command -v python3 &>/dev/null; then
-        local max_dur
-        max_dur=$(python3 -c "
-import yaml,sys
-try:
-    with open('/etc/sudome/config.yaml') as f:
-        c = yaml.safe_load(f)
-    print(c.get('max_duration', 0))
-except: print(0)
-" 2>/dev/null)
-        if [[ "$max_dur" -gt 0 ]] && [[ "$minutes" -gt "$max_dur" ]]; then
-            log err "Duration $minutes exceeds max_duration $max_dur"
-            echo "ERROR: Maximum allowed duration is $max_dur minutes"
-            exit 1
-        fi
+    local max_dur
+    max_dur=$(get_config "max_duration" "0")
+    if [[ "$max_dur" -gt 0 ]] && [[ "$minutes" -gt "$max_dur" ]]; then
+        log err "Duration $minutes exceeds max_duration $max_dur"
+        echo "ERROR: Maximum allowed duration is $max_dur minutes"
+        exit 1
     fi
 
     # Check if already in sudo group
@@ -122,10 +347,9 @@ except: print(0)
         now_ts=$(date +%s 2>/dev/null || python3 -c "import time; print(int(time.time()))")
         expiry=$((now_ts + minutes * 60))
 
-        # Persist expiry timestamp
+        # Atomic state file write
         mkdir -p "$STATE_DIR"
-        echo "$expiry" > "${STATE_DIR}/${USERNAME}.expiry"
-        chmod 644 "${STATE_DIR}/${USERNAME}.expiry"
+        atomic_write "${STATE_DIR}/${USERNAME}.expiry" "$expiry"
 
         # Write syslog audit event
         local now=$(date '+%m/%d/%Y %I:%M:%S %p')
@@ -152,6 +376,12 @@ except: print(0)
             "${notify_msg}" \
             "normal"
 
+        # Post-change action
+        run_post_change_action "grant" "$USERNAME" "$minutes" "$reason"
+        
+        # Webhook
+        send_webhook "grant" "$USERNAME" "$minutes" "$reason" "$expiry"
+
         echo "GRANTED $minutes $expiry"
     else
         log err "Failed to add '$USERNAME' to '$SUDO_GROUP' group"
@@ -164,6 +394,8 @@ except: print(0)
 cmd_revoke() {
     validate_user
     local reason="${ARG3:-}"
+    
+    validate_reason "$reason"
 
     # Check if in sudo group
     if ! groups "$USERNAME" | grep -qw "$SUDO_GROUP"; then
@@ -197,6 +429,12 @@ cmd_revoke() {
             "${notify_msg}" \
             "normal"
 
+        # Post-change action
+        run_post_change_action "revoke" "$USERNAME" "0" "$reason"
+        
+        # Webhook
+        send_webhook "revoke" "$USERNAME" "0" "$reason" "0"
+
         echo "REVOKED"
     else
         log err "Failed to remove '$USERNAME' from '$SUDO_GROUP' group"
@@ -211,11 +449,10 @@ cmd_status() {
 
     if groups "$USERNAME" | grep -qw "$SUDO_GROUP"; then
         if [[ -f "${STATE_DIR}/${USERNAME}.expiry" ]]; then
-            local expiry
+            local expiry now remaining
             expiry=$(cat "${STATE_DIR}/${USERNAME}.expiry")
-            local now
             now=$(date +%s)
-            local remaining=$((expiry - now))
+            remaining=$((expiry - now))
             echo "ACTIVE $remaining $expiry"
         else
             echo "ACTIVE 0 0"
@@ -237,6 +474,8 @@ cmd_renew() {
         echo "ERROR: Invalid duration. Must be a positive integer."
         exit 1
     fi
+    
+    validate_reason "$reason"
 
     # Check if currently active
     if ! groups "$USERNAME" | grep -qw "$SUDO_GROUP"; then
@@ -245,7 +484,7 @@ cmd_renew() {
         exit 0
     fi
 
-    # Extend expiry by adding minutes to current expiry (or now if file missing)
+    # Extend expiry
     mkdir -p "$STATE_DIR"
     local now_ts new_expiry
     now_ts=$(date +%s 2>/dev/null || python3 -c "import time; print(int(time.time()))")
@@ -262,14 +501,15 @@ cmd_renew() {
         new_expiry=$((now_ts + minutes * 60))
     fi
     
-    echo "$new_expiry" > "${STATE_DIR}/${USERNAME}.expiry"
-    chmod 644 "${STATE_DIR}/${USERNAME}.expiry"
+    atomic_write "${STATE_DIR}/${USERNAME}.expiry" "$new_expiry"
     
     local log_msg="RENEW: user='$USERNAME' minutes=$minutes expiry=$new_expiry"
     if [[ -n "$reason" ]]; then
         log_msg="$log_msg reason='$reason'"
     fi
     log notice "$log_msg"
+    
+    send_webhook "renew" "$USERNAME" "$minutes" "$reason" "$new_expiry"
     
     echo "GRANTED $minutes $new_expiry"
 }
@@ -281,7 +521,7 @@ case "$ACTION" in
     renew)  cmd_renew ;;
     status) cmd_status ;;
     *)
-        echo "ERROR: Unknown action '$ACTION'. Use: grant|revoke|status <username> [minutes] [reason]"
+        echo "ERROR: Unknown action '$ACTION'. Use: grant|revoke|renew|status <username> [minutes] [reason]"
         exit 1
         ;;
 esac
