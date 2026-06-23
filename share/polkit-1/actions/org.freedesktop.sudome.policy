@@ -27,9 +27,9 @@
     <message xml:lang="es">Se requiere autenticación para conceder acceso sudo temporal</message>
     <message xml:lang="fr">Authentification requise pour accorder un accès sudo temporaire</message>
     <defaults>
-      <allow_any>auth_admin</allow_any>
-      <allow_inactive>auth_admin</allow_inactive>
-      <allow_active>auth_admin_keep</allow_active>
+      <allow_any>auth_self</allow_any>
+      <allow_inactive>auth_self</allow_inactive>
+      <allow_active>auth_self_keep</allow_active>
     </defaults>
     <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/sudome/sudome-helper</annotate>
   </action>
@@ -45,9 +45,9 @@
     <message xml:lang="es">Se requiere autenticación para revocar acceso sudo temporal</message>
     <message xml:lang="fr">Authentification requise pour révoquer l'accès sudo temporaire</message>
     <defaults>
-      <allow_any>auth_admin</allow_any>
-      <allow_inactive>auth_admin</allow_inactive>
-      <allow_active>auth_admin_keep</allow_active>
+      <allow_any>auth_self</allow_any>
+      <allow_inactive>auth_self</allow_inactive>
+      <allow_active>auth_self_keep</allow_active>
     </defaults>
     <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/sudome/sudome-helper</annotate>
   </action>

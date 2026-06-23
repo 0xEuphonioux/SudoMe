@@ -76,11 +76,21 @@ install_deps() {
         ubuntu|debian|pop|linuxmint|elementary|zorin)
             info "Detected Debian-based distro"
             apt-get update -qq
+            
+            # Detect Ubuntu version for AppIndicator package
+            APPINDICATOR_PKG="gir1.2-appindicator3-0.1"
+            if [[ -f /etc/os-release ]]; then
+                . /etc/os-release
+                if [[ "$ID" == "ubuntu" ]] && [[ "${VERSION_ID%.*}" -ge 24 ]]; then
+                    APPINDICATOR_PKG="gir1.2-ayatanaappindicator3-0.1"
+                fi
+            fi
+            
             apt-get install -y -qq \
                 python3 \
                 python3-gi \
                 gir1.2-gtk-3.0 \
-                gir1.2-appindicator3-0.1 \
+                "$APPINDICATOR_PKG" \
                 gir1.2-notify-0.7 \
                 python3-yaml \
                 policykit-1 \

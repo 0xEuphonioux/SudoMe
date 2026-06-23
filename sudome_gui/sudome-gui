@@ -21,12 +21,30 @@ from pathlib import Path
 try:
     import gi
     gi.require_version("Gtk", "3.0")
-    gi.require_version("AppIndicator3", "0.1")
     gi.require_version("Notify", "0.7")
-    from gi.repository import Gtk, GLib, AppIndicator3, Notify
+    from gi.repository import Gtk, GLib, Notify
+    
+    # Try AppIndicator3 (Ubuntu ≤ 22.04) then AyatanaAppIndicator3 (Ubuntu 24.04+)
+    INDICATOR = None
+    try:
+        gi.require_version("AppIndicator3", "0.1")
+        from gi.repository import AppIndicator3 as IndicatorModule
+        INDICATOR = "AppIndicator3"
+    except (ValueError, ImportError):
+        try:
+            gi.require_version("AyatanaAppIndicator3", "0.1")
+            from gi.repository import AyatanaAppIndicator3 as IndicatorModule
+            INDICATOR = "AyatanaAppIndicator3"
+        except (ValueError, ImportError):
+            pass
+    
+    if INDICATOR is None:
+        raise ImportError("Neither AppIndicator3 nor AyatanaAppIndicator3 found")
+        
 except ImportError as e:
     print(f"Missing GTK dependencies. Install with:", file=sys.stderr)
-    print("  sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-appindicator3-0.1 gir1.2-notify-0.7", file=sys.stderr)
+    print("  Ubuntu ≤ 22.04: sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-appindicator3-0.1 gir1.2-notify-0.7", file=sys.stderr)
+    print("  Ubuntu ≥ 24.04: sudo apt install python3-gi gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1 gir1.2-notify-0.7", file=sys.stderr)
     print(f"Error: {e}", file=sys.stderr)
     sys.exit(1)
 
@@ -81,12 +99,12 @@ class SudoMeTrayApp:
         self._write_icons()
 
         # Create indicator
-        self.indicator = AppIndicator3.Indicator.new(
+        self.indicator = IndicatorModule.Indicator.new(
             APP_ID,
             "sudome-inactive",
-            AppIndicator3.IndicatorCategory.SYSTEM_SERVICES
+            IndicatorModule.IndicatorCategory.SYSTEM_SERVICES
         )
-        self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
+        self.indicator.set_status(IndicatorModule.IndicatorStatus.ACTIVE)
         self.indicator.set_attention_icon_full("sudome-expiring", "Sudo expiring soon")
 
         # Build menu
