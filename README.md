@@ -1,4 +1,6 @@
-<img src="https://raw.githubusercontent.com/0xEuphonioux/SudoMe/main/share/icons/hicolor/scalable/apps/sudome-active.svg" width="128" align="right">
+<p align="right">
+  <img src="https://githubusercontent.com" height="128">
+</p>
 
 
 
