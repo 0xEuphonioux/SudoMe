@@ -1,0 +1,5 @@
+#!/bin/bash
+# SudoMe Helper Revoke Wrapper — separate executable for pkexec path matching.
+# Polkit distinguishes grant (auth_self) from revoke (yes) by exec.path.
+# This wrapper just delegates to sudome-helper with the revoke action.
+exec /usr/lib/sudome/sudome-helper revoke "$@"

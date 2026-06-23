@@ -34,7 +34,7 @@
     <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/sudome/sudome-helper</annotate>
   </action>
 
-  <!-- Revoke sudo (remove user from sudo group) -->
+  <!-- Revoke sudo (remove user from sudo group) — separate action with own exec.path -->
   <action id="org.freedesktop.sudome.revoke">
     <description>Revoke temporary sudo access</description>
     <description xml:lang="de">Temporären sudo-Zugriff entziehen</description>
@@ -49,7 +49,7 @@
       <allow_inactive>yes</allow_inactive>
       <allow_active>yes</allow_active>
     </defaults>
-    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/sudome/sudome-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/sudome/sudome-helper-revoke</annotate>
   </action>
 
   <!-- Check sudo status -->

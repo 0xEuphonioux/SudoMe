@@ -38,6 +38,7 @@ APPS_DIR="${SHARE_DIR}/applications"
 # ── Source paths (relative to script) ──────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_HELPER="${SCRIPT_DIR}/sudome_helper/sudome-helper"
+SRC_HELPER_REVOKE="${SCRIPT_DIR}/sudome_helper/sudome-helper-revoke"
 SRC_CLI="${SCRIPT_DIR}/sudome_cli/sudome"
 SRC_DAEMON="${SCRIPT_DIR}/sudome_daemon/sudome-daemon"
 SRC_GUI="${SCRIPT_DIR}/sudome_gui/sudome-gui"
@@ -245,6 +246,11 @@ do_install() {
     install -m 755 "$SRC_HELPER" "${LIB_DIR}/sudome-helper"
     ok "Helper -> ${LIB_DIR}/sudome-helper"
 
+    # Revoke wrapper (separate exec.path so polkit can grant 'yes' auth)
+    info "Installing revoke helper..."
+    install -m 755 "$SRC_HELPER_REVOKE" "${LIB_DIR}/sudome-helper-revoke"
+    ok "Revoke helper -> ${LIB_DIR}/sudome-helper-revoke"
+
     # ── Install daemon ──
     info "Installing daemon..."
     install -m 755 "$SRC_DAEMON" "${LIB_DIR}/sudome-daemon"
@@ -422,6 +428,7 @@ do_uninstall() {
 
     info "Removing files..."
     rm -f "${LIB_DIR}/sudome-helper"
+    rm -f "${LIB_DIR}/sudome-helper-revoke"
     rm -f "${LIB_DIR}/sudome-daemon"
     rm -f "${BIN_DIR}/sudome"
     rm -f "${BIN_DIR}/sudome-gui"

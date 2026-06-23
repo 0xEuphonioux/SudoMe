@@ -52,6 +52,7 @@ VERSION = "2.0.0"
 APP_ID = "org.freedesktop.sudome"
 PKEXEC = "/usr/bin/pkexec"
 HELPER_PATH = "/usr/lib/sudome/sudome-helper"
+HELPER_REVOKE_PATH = "/usr/lib/sudome/sudome-helper-revoke"
 CONFIG_FILE = "/etc/sudome/config.yaml"
 
 
@@ -147,7 +148,9 @@ class SudoMeTrayApp:
 
     def _run_helper(self, action: str, minutes: int = 0, reason: str = "") -> tuple[int, str]:
         """Run the Polkit helper for privileged actions (grant/revoke only)."""
-        cmd = [PKEXEC, HELPER_PATH, action, self.username]
+        # Use separate helper for revoke so polkit matches the right action
+        helper = HELPER_REVOKE_PATH if action == "revoke" else HELPER_PATH
+        cmd = [PKEXEC, helper, action, self.username]
         if action == "grant" and minutes > 0:
             cmd.append(str(minutes))
             if reason:
