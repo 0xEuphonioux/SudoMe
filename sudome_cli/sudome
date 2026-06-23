@@ -26,7 +26,7 @@ import sys
 import time
 from pathlib import Path
 
-VERSION = "1.0.0"
+VERSION = "2.0.0"
 HELPER_PATH = "/usr/lib/sudome/sudome-helper"
 STATE_DIR = "/var/lib/sudome"
 CONFIG_FILE = "/etc/sudome/config.yaml"
