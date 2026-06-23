@@ -2,8 +2,6 @@
   <img src="https://raw.githubusercontent.com/0xEuphonioux/SudoMe/main/share/icons/hicolor/scalable/apps/sudome-active.svg" height="128">
 </p>
 
-
-
 # SudoMe
 
 ### Transparent, free, and secure admin rights management for Linux.
