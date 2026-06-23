@@ -83,11 +83,8 @@ class SudoMeTrayApp:
         # Build menu
         self._build_menu()
 
-        # Initial status check
-        GLib.timeout_add_seconds(1, self._check_status)
-        
-        # Periodic refresh (every 5 seconds)
-        GLib.timeout_add_seconds(5, self._periodic_refresh)
+        # Periodic status refresh (every 10 seconds, lightweight — no pkexec)
+        GLib.timeout_add_seconds(10, self._periodic_refresh)
 
         # Handle SIGINT/SIGTERM
         signal.signal(signal.SIGINT, signal.SIG_DFL)
@@ -146,11 +143,15 @@ class SudoMeTrayApp:
         self.menu.show_all()
         self.indicator.set_menu(self.menu)
 
-    def _run_helper(self, action: str, minutes: int = 0) -> tuple[int, str]:
-        """Run the Polkit helper."""
+    def _run_helper(self, action: str, minutes: int = 0, reason: str = "") -> tuple[int, str]:
+        """Run the Polkit helper for privileged actions (grant/revoke only)."""
         cmd = [PKEXEC, HELPER_PATH, action, self.username]
         if action == "grant" and minutes > 0:
             cmd.append(str(minutes))
+            if reason:
+                cmd.append(reason)
+        elif action == "revoke" and reason:
+            cmd.append(reason)
 
         try:
             result = subprocess.run(
@@ -161,25 +162,36 @@ class SudoMeTrayApp:
             return 1, str(e)
 
     def _get_status(self) -> tuple[str, int, int]:
-        """Get current sudo status. Returns (state, remaining, expiry)."""
-        ret, output = self._run_helper("status")
-        if ret != 0:
+        """Get current sudo status without pkexec (no auth prompt).
+        
+        Checks 'groups' command (no root needed) and reads state files.
+        Returns (state, remaining_seconds, expiry_timestamp)."""
+        try:
+            # Check if user is in sudo group (no root required)
+            result = subprocess.run(
+                ["groups", self.username],
+                capture_output=True, text=True, timeout=5
+            )
+            in_sudo = "sudo" in result.stdout
+            
+            if not in_sudo:
+                return "NOT_ACTIVE", 0, 0
+            
+            # User is in sudo group — check expiry
+            state_file = f"/var/lib/sudome/{self.username}.expiry"
+            try:
+                with open(state_file) as f:
+                    expiry = int(f.read().strip())
+                now = int(time.time())
+                remaining = expiry - now
+                if remaining <= 0:
+                    return "NOT_ACTIVE", 0, 0
+                return "ACTIVE", remaining, expiry
+            except (PermissionError, FileNotFoundError, ValueError):
+                # Can't read state file (non-root), but user IS in sudo group
+                return "ACTIVE", -1, 0
+        except Exception:
             return "ERROR", 0, 0
-
-        parts = output.split()
-        if not parts:
-            return "NOT_ACTIVE", 0, 0
-
-        state = parts[0]
-        remaining = int(parts[1]) if len(parts) > 1 else 0
-        expiry = int(parts[2]) if len(parts) > 2 else 0
-        return state, remaining, expiry
-
-    def _check_status(self):
-        """Check initial status and update UI."""
-        state, remaining, expiry = self._get_status()
-        self._update_ui(state, remaining, expiry)
-        return False  # Don't repeat
 
     def _periodic_refresh(self):
         """Periodic refresh of UI state."""
@@ -274,7 +286,9 @@ class SudoMeTrayApp:
             else:
                 self._notify("SudoMe", f"✗ Failed to grant: {output}", "critical")
 
-        self._check_status()
+        # Force immediate refresh
+        state, remaining, expiry = self._get_status()
+        self._update_ui(state, remaining, expiry)
 
     def _on_revoke(self, _widget):
         """Handle Revoke button click."""
@@ -285,7 +299,9 @@ class SudoMeTrayApp:
         else:
             self._notify("SudoMe", f"Revoke result: {output}")
 
-        self._check_status()
+        # Force immediate refresh
+        state, remaining, expiry = self._get_status()
+        self._update_ui(state, remaining, expiry)
 
     def _on_about(self, _widget):
         """Show About dialog."""
