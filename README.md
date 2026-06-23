@@ -4,249 +4,248 @@
 
 ### Transparent, free, and secure admin rights management for Linux.
 
-_SudoMe_ is a free Linux application designed for modern enterprise environments. It gives users temporary `sudo` (administrator) privileges when needed without granting permanent admin rights. The application is built with simplicity, security, and transparency in mind. Users can set a timeframe to perform specific tasks, such as installing packages or configuring system settings.
+_SudoMe_ gives users temporary `sudo` privileges when needed without granting permanent admin rights. Built for enterprise environments with automatic revocation, audit logging, webhook/SIEM integration, and Polkit-backed security. One click to elevate, automatic rollback when you're done.
 
-Using a standard user account instead of an administrator account adds an extra layer of security to your Linux system and is considered a security best practice. We believe that all users, including developers, can benefit from using _SudoMe_.
-
-**The current version of _SudoMe_ supports the following distributions:**
-
-- Ubuntu 22.04 LTS and newer
-- Debian 12 and newer
-- Linux Mint 21 and newer
-- Fedora 39 and newer
-- RHEL / Rocky / AlmaLinux 9 and newer
-- Arch Linux and derivatives
-- openSUSE Leap / Tumbleweed
-
-> **Inspired by [SAP Privileges for macOS](https://github.com/SAP/macOS-enterprise-privileges).**
+**Inspired by [SAP Privileges for macOS](https://github.com/SAP/macOS-enterprise-privileges).**
 
 <br/>
 
----
+## Install
+
+```bash
+git clone https://github.com/0xEuphonioux/SudoMe.git && cd SudoMe && sudo ./install.sh
+```
+
+That's it. The installer auto-detects your distro, installs dependencies, and starts the system tray. Choose CLI-only or CLI+GUI during install.
+
+**Supports:** Ubuntu 22.04+, Debian 12+, Fedora 39+, RHEL 9+, Arch, openSUSE
+
+<br/>
 
 ## Features
 
-🛠️ **Easy install** — single `./install.sh` script, distro auto-detection
+| Category | Feature |
+|----------|---------|
+| 🔐 **Security** | Polkit authentication every grant, no credentials stored, helper runs as root via pkexec only |
+| ⏱️ **Auto-revoke** | Timer expiry, screen lock, system sleep, time/date change, shutdown — all trigger immediate revocation |
+| 🛡️ **Excluded users** | Service accounts immune to auto-revoke (`auto_revoke_excluded_users`) |
+| 📋 **Reason enforcement** | Require reasons for elevation with configurable min/max length and preset lists |
+| 🔄 **Post-change actions** | Run scripts after every grant/revoke with SHA-256 checksum verification |
+| 🌐 **Webhooks** | HTTP POST to SIEM on grant/revoke/renew with custom JSON payload |
+| 🔔 **Renewal notifications** | Proactive desktop notification 60s before expiry with renew prompt |
+| 🖥️ **System tray** | GNOME/KDE/XFCE native AppIndicator with live countdown timer |
+| ⌨️ **CLI** | `sudome on/off/status/renew` with colored output and expiry countdown |
+| 📊 **Audit logging** | Structured syslog events, journalctl integration, SAP Privileges-compatible format |
+| ⚙️ **Enterprise config** | Everything controlled via `/etc/sudome/config.yaml` — deploy with Ansible, Puppet, Chef |
+| 🔒 **Hardened daemon** | systemd sandboxing: no new privileges, protect system, private /tmp, zero capabilities |
+| 🌍 **Cross-distro** | Single install script, auto-detects package manager and dependencies |
 
-🚀 **Perfect for day-to-day use** — system tray icon shows status at a glance
-
-🛜 **Works completely offline** — no internet connection required
-
-⏰ **Turn on sudo anytime** — `sudome on` for instant admin rights
-
-🔐 **Standard user security** — automatic revocation when timer expires
-
-🧰 **MDM-ready** — configurable via `/etc/sudome/config.yaml`, deployable via Ansible/Puppet/Chef
-
-⌨️ **CLI-first** — complete command-line interface with clear output
-
-🔔 **Desktop notifications** — warns before sudo expires
-
-🔁 **Renew expiring sudo** — extend at any time with `sudome renew`
-
-🔒 **Polkit-backed** — all privileged operations go through PolicyKit authentication
-
-📋 **Syslog audit logging** — every grant, revoke, and expiration is logged
-
-🖥️ **GTK system tray** — GNOME/Ubuntu native, AppIndicator compatible
-
-📦 **Packaging-ready** — DEB structure, install script, systemd integration
-
----
+<br/>
 
 ## Quick Start
 
 ```bash
-# Install SudoMe
-git clone https://github.com/0xEuphonioux/SudoMe.git
-cd SudoMe
-sudo ./install.sh
+# One-liner install
+git clone https://github.com/0xEuphonioux/SudoMe.git && cd SudoMe && sudo ./install.sh
 
-# Grant yourself 30 minutes of sudo
+# Grant 30 minutes of sudo
 sudome on
 
-# Grant yourself 60 minutes of sudo
-sudome on 60
+# Grant 60 minutes with a reason
+sudome on 60 -r "Installing Docker"
 
-# Check your status
+# Check status
 sudome status
 
-# Extend your current grant
+# Extend current grant
 sudome renew
 
 # Revoke immediately
 sudome off
 ```
 
-### Enable background auto-revocation
+<br/>
 
-```bash
-# Each user should run this once:
-systemctl --user enable --now sudome-daemon.timer
-
-# Check timer status:
-systemctl --user status sudome-daemon.timer
-```
-
-This timer checks every 30 seconds and automatically revokes sudo when it expires.
-
----
-
-## How It Works
+## Architecture
 
 ```
-User runs "sudome on"
+User clicks "SudoMe!" or runs "sudome on"
        │
        ▼
 ┌──────────────────┐
-│  sudome CLI/GUI  │  Polkit authentication dialog
+│  sudome CLI/GUI  │  Polkit authentication dialog (auth_self)
 └────────┬─────────┘
          │ pkexec
          ▼
 ┌──────────────────┐
 │  sudome-helper   │  Runs as root: usermod -aG sudo <user>
-│  (Polkit action) │  Writes expiry timestamp to /var/lib/sudome/
+│  (Polkit action) │  Atomic write of expiry timestamp
+└────────┬─────────┘  ────► Post-change action (script)
+         │                   ────► Webhook POST (SIEM)
+         ▼                   ────► Desktop notification
+┌──────────────────┐         ────► Syslog audit event
+│  User has sudo!  │
+│  Countdown starts│
 └────────┬─────────┘
          │
-         ▼
-┌──────────────────┐
-│  User now has    │  ─────────────────────────────▶
-│  sudo access!    │  │ systemd timer checks every 30s
-└──────────────────┘  │
-                       ▼
-                  ┌──────────────────┐
-                  │  sudome-daemon   │  When expired: usermod -G <user>
-                  │  (systemd timer) │  Removes user from sudo group
-                  └──────────────────┘
+    ┌────┴──────────────────────────┐
+    ▼                               ▼
+┌──────────────┐           ┌──────────────────┐
+│ sudome-daemon│ (10s poll)│  D-Bus listener  │
+│ Timer expiry │           │  Lock / Sleep    │
+│ + renewal    │           │  Time change     │
+│ notification │           │  Shutdown (TERM) │
+└──────┬───────┘           └────────┬─────────┘
+       │ pkexec (revoke, no auth)   │
+       └──────────┬─────────────────┘
+                  ▼
+          ┌──────────────┐
+          │ sudo REVOKED  │
+          └──────────────┘
 ```
+
+<br/>
 
 ## Components
 
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| `sudome` | `/usr/bin/sudome` | CLI tool for grant/revoke/status |
-| `sudome-gui` | `/usr/bin/sudome-gui` | GTK system tray application |
-| `sudome-helper` | `/usr/lib/sudome/sudome-helper` | Polkit-backed privileged operations |
-| `sudome-daemon` | `/usr/lib/sudome/sudome-daemon` | Background revoker (called by systemd timer) |
-| `sudome-daemon.timer` | `/usr/share/systemd/user/` | systemd timer — fires every 30 seconds |
-| `org.freedesktop.sudome.policy` | `/usr/share/polkit-1/actions/` | Polkit action definitions |
+| Component | Path | Purpose |
+|-----------|------|---------|
+| `sudome` | `/usr/bin/sudome` | CLI tool — grant, revoke, status, renew |
+| `sudome-gui` | `/usr/bin/sudome-gui` | GTK3 system tray with live countdown |
+| `sudome-helper` | `/usr/lib/sudome/sudome-helper` | Polkit-backed privileged operations (root) |
+| `sudome-helper-revoke` | `/usr/lib/sudome/sudome-helper-revoke` | Separate exec for revoke (Polkit `yes` policy) |
+| `sudome-daemon` | `/usr/lib/sudome/sudome-daemon` | Long-running D-Bus listener + timer check |
+| Polkit policy | `/usr/share/polkit-1/actions/` | Grant=`auth_self`, Revoke=`yes` |
+| D-Bus config | `/usr/share/dbus-1/system.d/` | Locked-down bus access |
+| systemd service | `/usr/share/systemd/user/` | Hardened user service |
 
----
+<br/>
 
-## Configuration
+## Enterprise Configuration
 
-Configuration lives at `/etc/sudome/config.yaml`:
-
-```yaml
-# Default duration for sudo grants (minutes)
-default_duration: 30
-
-# Maximum allowed duration (minutes, 0 = unlimited)
-max_duration: 480
-
-# How often the daemon checks (seconds)
-daemon_check_interval: 30
-
-# Automatically revoke at user logout
-revoke_on_logout: true
-
-# Desktop notification before expiry (seconds before)
-notify_before_expiry: 300
-
-# Syslog audit logging
-log_to_syslog: true
-syslog_facility: "auth"
-
-# Desktop notifications
-desktop_notifications: true
-
-# Optional webhook for SIEM integration
-# webhook_url: "https://your-siem.example.com/hooks/sudome"
-```
-
----
-
-## Enterprise Deployment
-
-### Ansible
+Full configuration reference at `/etc/sudome/config.yaml`:
 
 ```yaml
-- name: Deploy SudoMe
-  hosts: linux_workstations
-  tasks:
-    - name: Clone SudoMe
-      git:
-        repo: https://github.com/0xEuphonioux/SudoMe.git
-        dest: /tmp/sudome
-        version: main
+# ── Timing ──
+default_duration: 30          # Default grant duration (minutes)
+max_duration: 480             # Hard limit on requested duration
 
-    - name: Run installer
-      command: ./install.sh
-      args:
-        chdir: /tmp/sudome
-      become: yes
+# ── Excluded users (immune to ALL auto-revoke) ──
+auto_revoke_excluded_users:
+  - svc_backup
+  - emergency_admin
 
-    - name: Enable daemon for all users
-      shell: |
-        for user in $(getent passwd | awk -F: '$3>=1000 && $3<60000{print $1}'); do
-          su - "$user" -c "systemctl --user enable --now sudome-daemon.timer"
-        done
-      become: yes
+# ── Revocation triggers ──
+revoke_on_screen_lock: true
+revoke_on_sleep: true
+revoke_on_time_change: true
+revoke_on_shutdown: true
+
+# ── Reason enforcement ──
+require_reason: false          # Set to true to mandate reasons
+reason_min_length: 10
+reason_max_length: 256
+reason_presets:                # User must pick from this list
+  - "Installing software"
+  - "System configuration"
+  - "Troubleshooting"
+reason_strict_presets: false   # true = no custom reasons allowed
+
+# ── Post-change actions ──
+post_change_executable: "/usr/local/bin/sudome-audit.sh"
+post_change_executable_checksum: "sha256hex..."   # Optional integrity check
+pass_reason_to_executable: true
+
+# ── Webhooks (SIEM) ──
+webhook_url: "https://siem.example.com/hooks/sudome"
+webhook_custom_data:
+  environment: "production"
+webhook_timeout: 10
+
+# ── Notifications ──
+notify_before_expiry: 300      # Warn 5 min before expiry
+renewal_notification_interval: 60   # Renew prompt 60s before
+allow_privilege_renewal: true
 ```
 
-### Monitoring
+Deploy via Ansible:
 
-All events are logged to syslog with tag `sudome-helper`:
+```yaml
+- name: Deploy SudoMe config
+  copy:
+    src: sudome-config.yaml
+    dest: /etc/sudome/config.yaml
+    mode: 0644
+```
+
+<br/>
+
+## Audit & Monitoring
 
 ```bash
-# View grant/revoke events:
+# View all grant/revoke events
 journalctl -t sudome-helper
 
-# View daemon events:
+# View daemon events (auto-revoke, renewal notifications)
 journalctl -t sudome-daemon
 
-# Follow in real-time:
+# Follow in real-time
 journalctl -t sudome-helper -f
+
+# Remote syslog forwarding
+echo '*.* @your-syslog-server:514' > /etc/rsyslog.d/99-sudome.conf
+systemctl restart rsyslog
 ```
 
-Syslog format (same style as SAP Privileges):
+Syslog format (SAP Privileges-compatible):
 
 ```
-Jun 22 10:58:07 hostname sudome-helper: Process sudome created at 
-06/22/2026 10:58:07 PM by user jsmith in session 2 with an 
+Jun 22 10:58:07 hostname sudome-helper: Process sudome created at
+06/22/2026 10:58:07 PM by user jsmith in session 2 with an
 elevation type of Default. action: 'grant' minutes: '30'
 ```
 
----
+<br/>
+
+## Comparison with SAP Privileges
+
+| Feature | SAP Privileges (macOS) | SudoMe (Linux) |
+|---------|----------------------|----------------|
+| **Platform** | macOS 11–26 | Ubuntu, Debian, Fedora, Arch, openSUSE |
+| **Privilege system** | `admin` group | `sudo` group |
+| **GUI** | NSStatusItem menu bar | GTK3 AppIndicator system tray |
+| **CLI** | `PrivilegesCLI` (Swift) | `sudome` (Python 3) |
+| **Daemon** | `PrivilegesDaemon` (launchd root) | `sudome-daemon` (systemd user, hardened) |
+| **Auth** | LocalAuthentication / Smart Card | Polkit `auth_self` + PAM |
+| **Auto-revoke** | Timer, login, lock, time change | Timer, lock, sleep, time change, shutdown |
+| **Excluded users** | ✅ per-trigger exclusion lists | ✅ global exclusion list |
+| **Reason enforcement** | Required, presets, min/max | Required, presets, strict mode, min/max |
+| **Post-change actions** | ✅ with checksum verification | ✅ with checksum verification |
+| **Webhooks** | ✅ with queue and retry | ✅ JSON POST with custom data |
+| **Renewal** | ✅ with notification | ✅ with proactive notification |
+| **MDM / Config** | 50+ macOS profile keys | YAML config, Ansible/Puppet/Chef |
+| **Tamper protection** | Endpoint Security extension | systemd sandboxing (NoNewPrivileges, ProtectSystem) |
+| **Audit logging** | Unified log + ETW | syslog + journalctl |
+| **Smart card / PIV** | ✅ | 🔜 PAM integration planned |
+| **License** | Apache 2.0 | Apache 2.0 |
+
+<br/>
 
 ## Security
 
 > [!IMPORTANT]
-> Users with sudo privileges have extensive capabilities to make changes to a Linux system. This can include completely removing the _SudoMe_ application. Therefore, _SudoMe_ cannot guarantee that elevated permissions will be removed from the user account at all or on any specific schedule. _SudoMe_ cannot undo other changes made by a user — or processes acting as the user — when that user has elevated rights. Organizations should consider this when designing their client management, device compliance, security hardening, and auditing policies.
+> Users with sudo privileges can remove SudoMe or make unrestricted system changes. SudoMe cannot guarantee revocation on any specific schedule. Organizations should layer this with client management, compliance monitoring, and auditing policies.
 
-_SudoMe_ uses PolicyKit for authentication — no passwords are stored or transmitted. The privileged helper (`sudome-helper`) runs only the minimum required operations (`usermod` / `deluser`). The state directory (`/var/lib/sudome/`) is only writable by root. All operations are logged to syslog for audit trails.
+SudoMe's security model:
 
----
+- **No credential storage** — Polkit authenticates via PAM, no passwords saved
+- **Privilege separation** — Polkit policy: grant requires `auth_self`, revoke is `yes` (instant, no prompt)
+- **Input validation** — Username sanitized (`^[a-z_][a-z0-9_-]*$`), minutes validated as integer, reason length enforced
+- **Atomic writes** — State files written via tmpfile+mv, no partial reads
+- **systemd hardening** — `NoNewPrivileges`, `ProtectSystem=strict`, `PrivateTmp`, zero capabilities, restricted address families
+- **D-Bus lockdown** — Only `at_console` users can communicate; default policy = deny all
 
-## Comparison with SAP Privileges (macOS)
-
-| Feature | SAP Privileges (macOS) | SudoMe (Linux) |
-|---------|----------------------|----------------|
-| **Platform** | macOS 11–26 | Ubuntu, Debian, Fedora, Arch |
-| **Privilege system** | `admin` group | `sudo` group |
-| **GUI** | Native macOS menu bar | GTK system tray (AppIndicator) |
-| **CLI** | `PrivilegesCLI` | `sudome` |
-| **Background daemon** | `PrivilegesDaemon` (XPC) | `sudome-daemon` (systemd timer) |
-| **Privileged helper** | `PrivilegesHelper` (XPC) | `sudome-helper` (Polkit) |
-| **Config management** | MDM profile | `/etc/sudome/config.yaml` |
-| **Timeout** | Configurable (default 30 min) | Configurable (default 30 min) |
-| **Audit logging** | ETW + syslog | syslog (logger) |
-| **Webhooks** | ✅ | ✅ (configurable) |
-| **Smart card/PIV** | ✅ | 🔜 planned |
-| **Localized** | 41 languages | EN, DE, ES, FR (more planned) |
-| **License** | Apache 2.0 | Apache 2.0 |
-
----
+<br/>
 
 ## Uninstall
 
@@ -254,50 +253,8 @@ _SudoMe_ uses PolicyKit for authentication — no passwords are stored or transm
 sudo ./install.sh --uninstall
 ```
 
-Or manually remove all files listed in the [Components](#components) section.
-
----
-
-## Developing
-
-```bash
-# Clone the repo
-git clone https://github.com/0xEuphonioux/SudoMe.git
-cd SudoMe
-
-# Install dev dependencies (Ubuntu/Debian)
-sudo apt install python3 python3-gi gir1.2-gtk-3.0 \
-  gir1.2-appindicator3-0.1 gir1.2-notify-0.7 python3-yaml \
-  policykit-1
-```
-
-### Project structure
-
-```
-SudoMe/
-├── sudome_cli/         CLI tool (Python 3)
-├── sudome_helper/      Polkit helper (Bash)
-├── sudome_daemon/      Background revoker (Python 3)
-├── sudome_gui/         GTK system tray (Python 3)
-├── share/              System integration files
-│   ├── polkit-1/       Polkit actions
-│   ├── dbus-1/         D-Bus configuration
-│   ├── systemd/        systemd user units
-│   ├── applications/   .desktop entry
-│   └── icons/          Tray icons (SVG)
-├── etc/sudome/         Default configuration
-├── packaging/          Packaging scripts
-└── install.sh          Installer (Bash)
-```
-
----
+<br/>
 
 ## License
 
-Copyright (c) 2026 0xEuphonioux and SudoMe contributors. Licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
-
----
-
-## Support
-
-This project is provided 'as-is' with community support. Please open issues on GitHub for bugs, feature requests, or questions. Contributions are welcome!
+Copyright (c) 2026 0xEuphonioux and SudoMe contributors. Apache License 2.0.
