@@ -140,8 +140,8 @@ class SudoMeTrayApp:
         quit_item.connect("activate", lambda _: Gtk.main_quit())
         self.menu.append(quit_item)
 
-        self.menu.show_all()
         self.indicator.set_menu(self.menu)
+        self.menu.show_all()
 
     def _run_helper(self, action: str, minutes: int = 0, reason: str = "") -> tuple[int, str]:
         """Run the Polkit helper for privileged actions (grant/revoke only)."""
@@ -207,7 +207,7 @@ class SudoMeTrayApp:
             self.time_item.set_label(f"⏱ Remaining: {remaining_str}")
             self.time_item.show()
 
-            self.grant_item.set_label("Extend Sudo")
+            self.grant_item.set_label("SudoMe!")
             self.grant_item.set_sensitive(True)
             self.revoke_item.set_sensitive(True)
 
