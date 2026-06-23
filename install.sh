@@ -201,6 +201,13 @@ do_install() {
     install -m 644 "$SRC_DBUS" "${DBUS_DIR}/org.freedesktop.sudome.conf"
     ok "D-Bus config → ${DBUS_DIR}/org.freedesktop.sudome.conf"
 
+    # ── Install icons ──
+    info "Installing tray icons..."
+    install -m 644 "${SCRIPT_DIR}/share/icons/hicolor/scalable/apps/sudome-active.svg" "${ICON_DIR}/sudome-active.svg"
+    install -m 644 "${SCRIPT_DIR}/share/icons/hicolor/scalable/apps/sudome-inactive.svg" "${ICON_DIR}/sudome-inactive.svg"
+    install -m 644 "${SCRIPT_DIR}/share/icons/hicolor/scalable/apps/sudome-expiring.svg" "${ICON_DIR}/sudome-expiring.svg"
+    ok "Icons → ${ICON_DIR}/"
+
     # ── Install systemd units ──
     info "Installing systemd user units..."
     install -m 644 "$SRC_SERVICE" "${SYSTEMD_USER_DIR}/sudome-daemon.service"

@@ -53,29 +53,6 @@ APP_ID = "org.freedesktop.sudome"
 PKEXEC = "/usr/bin/pkexec"
 HELPER_PATH = "/usr/lib/sudome/sudome-helper"
 CONFIG_FILE = "/etc/sudome/config.yaml"
-ICON_DIR = "/usr/share/icons/hicolor/scalable/apps"
-
-# ── Icons (inline SVG) ─────────────────────────────────────────────────
-ICON_ACTIVE = """<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <circle cx="32" cy="32" r="28" fill="#2ecc71" stroke="#27ae60" stroke-width="2"/>
-  <text x="32" y="40" text-anchor="middle" font-size="28" font-weight="bold" 
-        fill="white" font-family="sans-serif">#</text>
-</svg>"""
-
-ICON_INACTIVE = """<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <circle cx="32" cy="32" r="28" fill="#95a5a6" stroke="#7f8c8d" stroke-width="2"/>
-  <text x="32" y="40" text-anchor="middle" font-size="28" font-weight="bold" 
-        fill="white" font-family="sans-serif">#</text>
-</svg>"""
-
-ICON_EXPIRING = """<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <circle cx="32" cy="32" r="28" fill="#f39c12" stroke="#e67e22" stroke-width="2"/>
-  <text x="32" y="40" text-anchor="middle" font-size="28" font-weight="bold" 
-        fill="white" font-family="sans-serif">#</text>
-</svg>"""
 
 
 class SudoMeTrayApp:
@@ -93,10 +70,6 @@ class SudoMeTrayApp:
 
         # Initialize notifications
         Notify.init(APP_ID)
-
-        # Create icons directory and icons
-        os.makedirs(ICON_DIR, exist_ok=True)
-        self._write_icons()
 
         # Create indicator
         self.indicator = IndicatorModule.Indicator.new(
@@ -130,18 +103,6 @@ class SudoMeTrayApp:
                     self.default_minutes = config.get("default_duration", 30)
         except ImportError:
             pass  # yaml not available, use defaults
-
-    def _write_icons(self):
-        """Write SVG icon files."""
-        icons = {
-            "sudome-active.svg": ICON_ACTIVE,
-            "sudome-inactive.svg": ICON_INACTIVE,
-            "sudome-expiring.svg": ICON_EXPIRING,
-        }
-        for name, svg in icons.items():
-            path = os.path.join(ICON_DIR, name)
-            with open(path, "w") as f:
-                f.write(svg)
 
     def _build_menu(self):
         """Create the system tray menu."""
