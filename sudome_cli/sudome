@@ -28,6 +28,7 @@ from pathlib import Path
 
 VERSION = "2.0.0"
 HELPER_PATH = "/usr/lib/sudome/sudome-helper"
+HELPER_REVOKE_PATH = "/usr/lib/sudome/sudome-helper-revoke"
 STATE_DIR = "/var/lib/sudome"
 CONFIG_FILE = "/etc/sudome/config.yaml"
 PKEXEC = "/usr/bin/pkexec"
@@ -57,7 +58,9 @@ def run_helper(action: str, minutes: int = 0, reason: str = "") -> tuple[int, st
     except OSError:
         username = pwd.getpwuid(os.getuid()).pw_name
 
-    cmd = [PKEXEC, HELPER_PATH, action, username]
+    # Use revoke-specific helper for revoke (Polkit 'yes' policy, no auth)
+    helper = HELPER_REVOKE_PATH if action == "revoke" else HELPER_PATH
+    cmd = [PKEXEC, helper, action, username]
     if action in ("grant", "renew") and minutes > 0:
         cmd.append(str(minutes))
         if reason:

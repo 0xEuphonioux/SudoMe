@@ -87,6 +87,11 @@ validate_user() {
 
 # ── Interactive reason prompt (runs AFTER pkexec auth, uses /dev/tty) ──
 prompt_reason_interactive() {
+    # Only works when a terminal is attached (pkexec from CLI preserves it)
+    if [[ ! -c /dev/tty ]]; then
+        echo "ERROR: Reason is required but no terminal available. Use -r flag or GUI." >&2
+        exit 1
+    fi
     local presets min_len strict reason choice
     presets=$(get_config "reason_presets" "")
     min_len=$(get_config "reason_min_length" "0")

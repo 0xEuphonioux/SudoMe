@@ -373,33 +373,91 @@ class SudoMeTrayApp:
 
     def _is_reason_required(self):
         """Check config if reason is required for grants."""
+        return self._get_config_bool("require_reason", False)
+
+    def _get_config_bool(self, key, default=False):
+        """Read a boolean config value, with fallback if yaml not available."""
+        return self._get_config_value(key, default) in (True, "true", "True")
+
+    def _get_config_value(self, key, default=None):
+        """Read a config value from /etc/sudome/config.yaml.
+        Uses pyyaml if available, falls back to simple parser."""
+        if not os.path.exists(CONFIG_FILE):
+            return default
         try:
             import yaml
-            if os.path.exists(CONFIG_FILE):
-                with open(CONFIG_FILE) as f:
-                    config = yaml.safe_load(f) or {}
-                if config.get("require_reason", False):
-                    return True
+            with open(CONFIG_FILE) as f:
+                config = yaml.safe_load(f) or {}
+            return config.get(key, default)
         except Exception:
-            pass
-        return False
+            return self._parse_config_simple(key, default)
+
+    def _parse_config_simple(self, key, default=None):
+        """Simple YAML parser for SudoMe config (no pyyaml dependency).
+        Handles: key: value, key: true/false, lists with - prefix."""
+        try:
+            with open(CONFIG_FILE) as f:
+                lines = f.readlines()
+        except Exception:
+            return default
+        
+        in_key = False
+        in_list = False
+        list_values = []
+        
+        for line in lines:
+            stripped = line.rstrip()
+            # Skip comments and empty lines
+            if stripped.startswith("#") or not stripped:
+                continue
+            
+            # Check if we're collecting a list for this key
+            if in_list:
+                if stripped.startswith("- "):
+                    list_values.append(stripped[2:].strip().strip("'\""))
+                    continue
+                else:
+                    # End of list
+                    in_list = False
+                    return list_values
+            
+            # Try key: value
+            if ": " in stripped or ":\n" in stripped:
+                k, _, v = stripped.partition(":")
+                k = k.strip()
+                v = v.strip()
+                
+                if k == key:
+                    if v == "":
+                        # Might be start of a list
+                        in_list = True
+                        in_key = True
+                        list_values = []
+                        continue
+                    # Remove quotes
+                    v = v.strip("'\"")
+                    # Parse booleans
+                    if v.lower() == "true":
+                        return True
+                    if v.lower() == "false":
+                        return False
+                    # Parse numbers
+                    try:
+                        return int(v)
+                    except ValueError:
+                        pass
+                    return v
+        
+        if in_list and list_values:
+            return list_values
+        return default
 
     def _prompt_reason(self):
         """Show a dialog to collect reason for elevation.
         Returns reason string, or None if cancelled."""
-        try:
-            import yaml
-            config = {}
-            if os.path.exists(CONFIG_FILE):
-                with open(CONFIG_FILE) as f:
-                    config = yaml.safe_load(f) or {}
-            presets = config.get("reason_presets", [])
-            strict = config.get("reason_strict_presets", False)
-            min_len = config.get("reason_min_length", 0)
-        except Exception:
-            presets = []
-            strict = False
-            min_len = 0
+        presets = self._get_config_value("reason_presets", []) or []
+        strict = self._get_config_bool("reason_strict_presets", False)
+        min_len = self._get_config_value("reason_min_length", 0) or 0
 
         dialog = Gtk.Dialog(
             title="Reason for Elevation",
