@@ -190,8 +190,9 @@ class SudoMeTrayApp:
                     return "NOT_ACTIVE", 0, 0
                 return "ACTIVE", remaining, expiry
             except (PermissionError, FileNotFoundError, ValueError):
-                # Can't read state file (non-root), but user IS in sudo group
-                return "ACTIVE", -1, 0
+                # Can't read expiry (old grant, permissions, or manual sudo)
+                # Show as ACTIVE without live countdown
+                return "ACTIVE_UNKNOWN", 0, 0
         except Exception:
             return "ERROR", 0, 0
 
@@ -247,6 +248,23 @@ class SudoMeTrayApp:
             self.menu.show_all()
 
             # Stop countdown
+            self._stop_countdown()
+
+        elif state == "ACTIVE_UNKNOWN":
+            self.status_item.set_label("Sudo: ACTIVE (unknown expiry)")
+            self.time_item.set_label("  (no timer data)")
+            self.time_item.show()
+
+            self.grant_item.set_label("Extend Sudo")
+            self.grant_item.set_sensitive(True)
+            self.revoke_item.set_sensitive(True)
+
+            self.indicator.set_icon_full("sudome-active", "SudoMe — Active")
+            self.indicator.set_label("Active", "Active")
+            self.indicator.set_title("SudoMe: Active (no timer)")
+            self.expiry_ts = 0
+            self.menu.show_all()
+
             self._stop_countdown()
 
         else:

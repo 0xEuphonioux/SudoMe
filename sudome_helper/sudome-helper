@@ -86,7 +86,7 @@ cmd_grant() {
         # Persist expiry timestamp
         mkdir -p "$STATE_DIR"
         echo "$expiry" > "${STATE_DIR}/${USERNAME}.expiry"
-        chmod 600 "${STATE_DIR}/${USERNAME}.expiry"
+        chmod 644 "${STATE_DIR}/${USERNAME}.expiry"
 
         # Write syslog audit event
         local now=$(date '+%m/%d/%Y %I:%M:%S %p')
