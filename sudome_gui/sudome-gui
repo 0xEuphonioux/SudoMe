@@ -64,6 +64,7 @@ class SudoMeTrayApp:
         self.expiry_ts = 0
         self.indicator = None
         self.menu = None
+        self._countdown_timer = None  # GLib source id for 1-second countdown
         
         # Load config defaults
         self._load_config()
@@ -118,7 +119,7 @@ class SudoMeTrayApp:
         self.menu.append(Gtk.SeparatorMenuItem())
 
         # Grant sudo
-        self.grant_item = Gtk.MenuItem(label="Grant Sudo (30 min)")
+        self.grant_item = Gtk.MenuItem(label=f"SudoMe! ({self.default_minutes} min)")
         self.grant_item.connect("activate", self._on_grant)
         self.menu.append(self.grant_item)
 
@@ -204,10 +205,10 @@ class SudoMeTrayApp:
         if state == "ACTIVE":
             remaining_str = self._format_time(remaining)
             self.status_item.set_label(f"Sudo: ACTIVE")
-            self.time_item.set_label(f"⏱ Remaining: {remaining_str}")
+            self.time_item.set_label(f"  Remaining: {remaining_str}")
             self.time_item.show()
 
-            self.grant_item.set_label("SudoMe!")
+            self.grant_item.set_label("Extend Sudo")
             self.grant_item.set_sensitive(True)
             self.revoke_item.set_sensitive(True)
 
@@ -224,12 +225,15 @@ class SudoMeTrayApp:
             self.indicator.set_title(f"SudoMe: {remaining_str}")
             self.expiry_ts = expiry
 
+            # Start live countdown if not already running
+            self._start_countdown()
+
         elif state == "NOT_ACTIVE":
             self.status_item.set_label("Sudo: NOT active")
             self.time_item.set_label("")
             self.time_item.hide()
 
-            self.grant_item.set_label(f"Grant Sudo ({self.default_minutes} min)")
+            self.grant_item.set_label(f"SudoMe! ({self.default_minutes} min)")
             self.grant_item.set_sensitive(True)
             self.revoke_item.set_sensitive(False)
 
@@ -237,10 +241,50 @@ class SudoMeTrayApp:
             self.indicator.set_title("SudoMe: Off")
             self.expiry_ts = 0
 
+            # Stop countdown
+            self._stop_countdown()
+
         else:
             self.status_item.set_label(f"Sudo: {state}")
             self.grant_item.set_sensitive(False)
             self.revoke_item.set_sensitive(False)
+
+    def _start_countdown(self):
+        """Start 1-second countdown timer if not already running."""
+        if self._countdown_timer is None:
+            self._countdown_timer = GLib.timeout_add_seconds(1, self._tick_countdown)
+
+    def _stop_countdown(self):
+        """Stop the countdown timer."""
+        if self._countdown_timer is not None:
+            GLib.source_remove(self._countdown_timer)
+            self._countdown_timer = None
+
+    def _tick_countdown(self):
+        """Update live countdown display every second."""
+        if self.expiry_ts <= 0:
+            self._stop_countdown()
+            return False
+
+        now = int(time.time())
+        remaining = self.expiry_ts - now
+
+        if remaining <= 0:
+            self.time_item.set_label("  Expired")
+            self.indicator.set_title("SudoMe: Expired")
+            self._stop_countdown()
+            # Next periodic refresh will switch to NOT_ACTIVE
+            return False
+
+        remaining_str = self._format_time(remaining)
+        self.time_item.set_label(f"  Remaining: {remaining_str}")
+        self.indicator.set_title(f"SudoMe: {remaining_str}")
+
+        # Switch icon to expiring when < 5 min
+        if remaining <= 300 and remaining > 0:
+            self.indicator.set_icon_full("sudome-expiring", "Sudo expiring soon")
+
+        return True  # Keep timer running
 
     def _format_time(self, seconds: int) -> str:
         """Format seconds to human-readable string."""
