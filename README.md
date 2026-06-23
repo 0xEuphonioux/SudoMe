@@ -213,7 +213,7 @@ Syslog format (same style as SAP Privileges):
 
 ```
 Jun 22 10:58:07 hostname sudome-helper: Process sudome created at 
-06/22/2026 10:58:07 PM by user klucano in session 2 with an 
+06/22/2026 10:58:07 PM by user jsmith in session 2 with an 
 elevation type of Default. action: 'grant' minutes: '30'
 ```
 
