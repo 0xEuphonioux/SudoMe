@@ -153,7 +153,7 @@ class SudoMeTrayApp:
         # Use separate helper for revoke so polkit matches the right action
         helper = HELPER_REVOKE_PATH if action == "revoke" else HELPER_PATH
         cmd = [PKEXEC, helper, action, self.username]
-        if action == "grant" and minutes > 0:
+        if action in ("grant", "renew") and minutes > 0:
             cmd.append(str(minutes))
             if reason:
                 cmd.append(reason)
@@ -344,27 +344,141 @@ class SudoMeTrayApp:
     def _on_grant(self, _widget):
         """Handle Grant/Extend button click."""
         state, _, _ = self._get_status()
+        reason = ""
 
-        if state == "ACTIVE":
-            # Extend using renew (doesn't need group modification, extends expiry)
-            self._notify("SudoMe", f"Extending sudo by {self.default_minutes} minutes...")
-            ret, output = self._run_helper("renew", self.default_minutes)
-            if ret == 0:
-                self._notify("SudoMe", f"✓ Sudo extended by {self.default_minutes} minutes")
-            else:
-                self._notify("SudoMe", f"✗ Failed to extend: {output}", "critical")
+        if state in ("ACTIVE", "ACTIVE_UNKNOWN"):
+            # Extend using renew
+            action = "renew"
+            label = "Extending"
         else:
-            # Grant
-            self._notify("SudoMe", f"Requesting sudo for {self.default_minutes} minutes...")
-            ret, output = self._run_helper("grant", self.default_minutes)
-            if ret == 0:
-                self._notify("SudoMe", f"✓ Sudo granted for {self.default_minutes} minutes")
-            else:
-                self._notify("SudoMe", f"✗ Failed to grant: {output}", "critical")
+            # Grant — check if reason is required
+            action = "grant"
+            label = "Requesting"
+            if self._is_reason_required():
+                reason = self._prompt_reason()
+                if reason is None:  # User cancelled
+                    return
+
+        self._notify("SudoMe", f"{label} sudo for {self.default_minutes} minutes...")
+        ret, output = self._run_helper(action, self.default_minutes, reason)
+        if ret == 0:
+            self._notify("SudoMe", f"✓ Sudo {'extended' if action == 'renew' else 'granted'} for {self.default_minutes} minutes")
+        else:
+            self._notify("SudoMe", f"✗ Failed: {output}", "critical")
 
         # Force immediate refresh
         state, remaining, expiry = self._get_status()
         self._update_ui(state, remaining, expiry)
+
+    def _is_reason_required(self):
+        """Check config if reason is required for grants."""
+        try:
+            import yaml
+            if os.path.exists(CONFIG_FILE):
+                with open(CONFIG_FILE) as f:
+                    config = yaml.safe_load(f) or {}
+                if config.get("require_reason", False):
+                    return True
+        except Exception:
+            pass
+        return False
+
+    def _prompt_reason(self):
+        """Show a dialog to collect reason for elevation.
+        Returns reason string, or None if cancelled."""
+        try:
+            import yaml
+            config = {}
+            if os.path.exists(CONFIG_FILE):
+                with open(CONFIG_FILE) as f:
+                    config = yaml.safe_load(f) or {}
+            presets = config.get("reason_presets", [])
+            strict = config.get("reason_strict_presets", False)
+            min_len = config.get("reason_min_length", 0)
+        except Exception:
+            presets = []
+            strict = False
+            min_len = 0
+
+        dialog = Gtk.Dialog(
+            title="Reason for Elevation",
+            parent=None,
+            flags=Gtk.DialogFlags.MODAL,
+            buttons=(
+                Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                Gtk.STOCK_OK, Gtk.ResponseType.OK
+            )
+        )
+        dialog.set_default_size(400, 200)
+        dialog.set_border_width(10)
+
+        box = dialog.get_content_area()
+        box.set_spacing(8)
+
+        label = Gtk.Label(label="Please provide a reason for requesting administrator privileges:")
+        label.set_line_wrap(True)
+        label.set_xalign(0)
+        box.pack_start(label, False, False, 0)
+
+        # Preset combo box if presets configured
+        combo = None
+        if presets:
+            preset_store = Gtk.ListStore(str)
+            for p in presets:
+                preset_store.append([p])
+            combo = Gtk.ComboBox.new_with_model(preset_store)
+            renderer = Gtk.CellRendererText()
+            combo.pack_start(renderer, True)
+            combo.add_attribute(renderer, "text", 0)
+            combo.set_active(0)
+            box.pack_start(combo, False, False, 0)
+
+        # Text entry
+        entry = Gtk.Entry()
+        entry.set_placeholder_text("e.g., Installing Docker for project deployment")
+        if strict:
+            entry.set_sensitive(False)
+            entry.set_text(presets[0] if presets else "")
+        box.pack_start(entry, False, False, 0)
+
+        # Length hint
+        if min_len > 0:
+            hint = Gtk.Label(label=f"Minimum {min_len} characters required")
+            hint.set_xalign(0)
+            box.pack_start(hint, False, False, 0)
+
+        # Connect combo to entry (if not strict)
+        if combo and not strict:
+            def on_combo_changed(cb):
+                tree_iter = cb.get_active_iter()
+                if tree_iter:
+                    model = cb.get_model()
+                    entry.set_text(model[tree_iter][0])
+            combo.connect("changed", on_combo_changed)
+
+        box.show_all()
+        response = dialog.run()
+
+        reason = None
+        if response == Gtk.ResponseType.OK:
+            reason = entry.get_text().strip()
+            if min_len > 0 and len(reason) < min_len:
+                error_dialog = Gtk.MessageDialog(
+                    parent=dialog,
+                    flags=Gtk.DialogFlags.MODAL,
+                    type=Gtk.MessageType.ERROR,
+                    buttons=Gtk.ButtonsType.OK,
+                    message_format=f"Reason must be at least {min_len} characters."
+                )
+                error_dialog.run()
+                error_dialog.destroy()
+                dialog.destroy()
+                return None  # Will need to re-prompt
+            dialog.destroy()
+            return reason
+
+        dialog.destroy()
+        return None
 
     def _on_revoke(self, _widget):
         """Handle Revoke button click."""

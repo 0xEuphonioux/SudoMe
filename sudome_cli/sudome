@@ -80,19 +80,44 @@ def run_helper(action: str, minutes: int = 0, reason: str = "") -> tuple[int, st
         return 1, "ERROR: pkexec not found. Is PolicyKit installed?"
 
 def get_status() -> tuple[str, int, int]:
-    """Returns (state, remaining_seconds, expiry_timestamp)."""
-    ret, output = run_helper("status")
-    if ret != 0:
+    """Returns (state, remaining_seconds, expiry_timestamp).
+    
+    Uses direct filesystem/group checks — no pkexec needed.
+    pkexec for 'status' was matching the grant action (auth_self)
+    and causing a spurious auth prompt.
+    """
+    # Use getpwuid for trusted username
+    import pwd
+    try:
+        username = os.getlogin()
+    except OSError:
+        username = pwd.getpwuid(os.getuid()).pw_name
+    
+    # Check if user is in sudo group
+    try:
+        result = subprocess.run(
+            ["groups", username],
+            capture_output=True, text=True, timeout=5
+        )
+        in_sudo = "sudo" in result.stdout
+    except Exception:
         return "ERROR", 0, 0
-
-    parts = output.split()
-    if not parts:
+    
+    if not in_sudo:
         return "NOT_ACTIVE", 0, 0
-
-    state = parts[0]
-    remaining = int(parts[1]) if len(parts) > 1 else 0
-    expiry = int(parts[2]) if len(parts) > 2 else 0
-    return state, remaining, expiry
+    
+    # Read expiry timestamp from state file
+    state_file = f"/var/lib/sudome/{username}.expiry"
+    try:
+        with open(state_file) as f:
+            expiry = int(f.read().strip())
+        now = int(time.time())
+        remaining = expiry - now
+        if remaining <= 0:
+            return "NOT_ACTIVE", 0, 0
+        return "ACTIVE", remaining, expiry
+    except (PermissionError, FileNotFoundError, ValueError):
+        return "ACTIVE_UNKNOWN", 0, 0
 
 def format_time(seconds: int) -> str:
     """Format seconds into human-readable time."""
@@ -112,7 +137,7 @@ def cmd_status():
     """Show current sudo status."""
     state, remaining, expiry = get_status()
 
-    if state == "ACTIVE":
+    if state in ("ACTIVE", "ACTIVE_UNKNOWN"):
         print(f"  {green('●')} Sudo is {bold('ACTIVE')}")
         print(f"    Time remaining: {cyan(format_time(remaining))}")
         if expiry > 0:
@@ -124,6 +149,10 @@ def cmd_status():
     elif state == "NOT_ACTIVE":
         print(f"  {yellow('○')} Sudo is {bold('NOT active')}")
         print(f"  Run {bold('sudome on')} to request temporary sudo")
+    elif state == "ACTIVE_UNKNOWN":
+        print(f"  {green('●')} Sudo is {bold('ACTIVE')} (expiry unknown)")
+        print(f"  Run {bold('sudome off')} to revoke immediately")
+        print(f"  Run {bold('sudome renew')} to extend")
     else:
         print(f"  {red('✗')} {red(state)}")
 
@@ -135,7 +164,7 @@ def cmd_on(minutes: int = 30, reason: str = ""):
 
     # Check if already active
     state, remaining, _ = get_status()
-    if state == "ACTIVE":
+    if state in ("ACTIVE", "ACTIVE_UNKNOWN"):
         print(yellow(f"Sudo is already active ({format_time(remaining)} remaining)"))
         print(f"Run {bold('sudome renew')} to extend, or {bold('sudome off')} to revoke first")
         sys.exit(0)
@@ -169,7 +198,7 @@ def cmd_off(reason: str = ""):
     """Revoke sudo immediately."""
     state, remaining, _ = get_status()
 
-    if state != "ACTIVE":
+    if state not in ("ACTIVE", "ACTIVE_UNKNOWN"):
         print(yellow("Sudo is not currently active"))
         sys.exit(0)
 
@@ -193,7 +222,7 @@ def cmd_renew(minutes: int = 30, reason: str = ""):
     """Extend current sudo grant."""
     state, remaining, expiry = get_status()
 
-    if state != "ACTIVE":
+    if state not in ("ACTIVE", "ACTIVE_UNKNOWN"):
         print(yellow("Sudo is not currently active"))
         print(f"Run {bold('sudome on')} to request sudo first")
         sys.exit(1)
