@@ -3,9 +3,9 @@
 # Installs all components for temporary sudo privilege elevation.
 #
 # Usage:
-#   sudo ./install.sh              # Full install (CLI + GUI, system-wide)
-#   sudo ./install.sh --cli-only   # CLI only (no GUI, no GTK deps)
+#   sudo ./install.sh              # Interactive: choose CLI only or CLI + GUI
 #   sudo ./install.sh --uninstall  # Remove SudoMe
+#   sudo ./install.sh --help       # Show help
 #
 # SPDX-License-Identifier: Apache-2.0
 
@@ -159,6 +159,29 @@ install_deps() {
     ok "Dependencies installed"
 }
 
+# ── Prompt for install mode ───────────────────────────────────────────
+prompt_mode() {
+    echo -e ""
+    echo -e "  ${BOLD}Select install mode:${RESET}"
+    echo -e ""
+    echo -e "    ${GREEN}${BOLD}[1]${RESET}  ${CYAN}CLI + GUI${RESET}  — Full install (sudome, helper, daemon, system tray)"
+    echo -e "    ${YELLOW}${BOLD}[2]${RESET}  ${CYAN}CLI only${RESET}    — Headless (sudome, helper, daemon — no GUI)"
+    echo -e ""
+    echo -ne "  ${BOLD}Choice${RESET} [${GREEN}1${RESET}/${YELLOW}2${RESET}] "
+    read -r MODE_CHOICE
+    case "$MODE_CHOICE" in
+        2) INSTALL_MODE="cli";;
+        *) INSTALL_MODE="full";;
+    esac
+    echo -e ""
+    if [[ "$INSTALL_MODE" == "cli" ]]; then
+        echo -e "  ${BOLD}Mode:${RESET} ${CYAN}CLI only${RESET} (sudome, helper, daemon — no GUI)"
+    else
+        echo -e "  ${BOLD}Mode:${RESET} ${CYAN}CLI + GUI${RESET} (full install with system tray)"
+    fi
+    echo -e ""
+}
+
 # ── Install SudoMe ─────────────────────────────────────────────────────
 do_install() {
     require_root
@@ -180,12 +203,6 @@ do_install() {
     echo -e "  ${RED}▲${RESET} ${BOLD}${YELLOW}WARNING:${RESET} This script will install system-wide components."
     echo -e "  ${RED}▲${RESET} It requires ${BOLD}root${RESET} and will modify system configuration."
     echo -e ""
-    if [[ "$INSTALL_MODE" == "cli" ]]; then
-        echo -e "  ${BOLD}Mode:${RESET} ${CYAN}CLI only${RESET} (sudome, helper, daemon — no GUI)"
-    else
-        echo -e "  ${BOLD}Mode:${RESET} ${CYAN}CLI + GUI${RESET} (full install with system tray)"
-    fi
-    echo -e ""
 
     # ── Confirmation ──────────────────────────────────────────────────
     echo -ne "  ${BOLD}Continue with install?${RESET} [${GREEN}Y${RESET}/${RED}n${RESET}] "
@@ -195,6 +212,9 @@ do_install() {
         exit 0
     fi
     echo -e ""
+
+    # ── Mode selection ────────────────────────────────────────────────
+    prompt_mode
 
     install_deps
 
@@ -424,23 +444,17 @@ case "${1:-}" in
     --uninstall|-u|remove)
         do_uninstall
         ;;
-    --cli-only|-c)
-        INSTALL_MODE="cli"
-        do_install
-        ;;
     --help|-h)
         echo "SudoMe v2.0.0 — Temporary sudo privilege elevation for Linux"
         echo ""
         echo "Usage: sudo ./install.sh [OPTION]"
         echo ""
-        echo "  (no args)       Full install (CLI + GUI)"
-        echo "  --cli-only, -c  CLI only (no GUI, no GTK deps)"
+        echo "  (no args)       Interactive install (choose CLI only or CLI + GUI)"
         echo "  --uninstall, -u Remove SudoMe"
         echo "  --help, -h      Show this help"
         echo ""
         echo "Examples:"
-        echo "  sudo ./install.sh               # Everything"
-        echo "  sudo ./install.sh --cli-only    # Headless/server"
+        echo "  sudo ./install.sh               # Interactive install"
         echo "  sudo ./install.sh --uninstall   # Remove all"
         ;;
     *)
