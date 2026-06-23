@@ -1,5 +1,5 @@
 <p align="right">
-  <img src="https://githubusercontent.com](https://raw.githubusercontent.com/0xEuphonioux/SudoMe/main/share/icons/hicolor/scalable/apps/sudome-active.svg" height="128">
+  <img src="https://raw.githubusercontent.com/0xEuphonioux/SudoMe/main/share/icons/hicolor/scalable/apps/sudome-active.svg" height="128">
 </p>
 
 
