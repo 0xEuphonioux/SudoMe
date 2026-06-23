@@ -13,15 +13,14 @@ set -euo pipefail
 
 INSTALL_MODE="full"  # "full" or "cli"
 
-# ── Colors ──────────────────────────────────────────────────────────────
-RED='\033[91m'; GREEN='\033[92m'; YELLOW='\033[93m'; CYAN='\033[96m'
+# ── Text styles ─────────────────────────────────────────────────────────
 BOLD='\033[1m'; RESET='\033[0m'
 
-info()  { echo -e "  ${CYAN}→${RESET} $*"; }
-ok()    { echo -e "  ${GREEN}✓${RESET} $*"; }
-warn()  { echo -e "  ${YELLOW}⚠${RESET} $*"; }
-err()   { echo -e "  ${RED}✗${RESET} $*"; }
-header() { echo -e "\n${BOLD}${CYAN}═══ $* ═══${RESET}"; }
+info()  { echo -e "  -> $*"; }
+ok()    { echo -e "  [OK] $*"; }
+warn()  { echo -e "  [!!] $*"; }
+err()   { echo -e "  [ERROR] $*"; }
+header() { echo -e "\n--- $* ---"; }
 
 # ── Paths ──────────────────────────────────────────────────────────────
 INSTALL_PREFIX="/usr"
@@ -53,7 +52,7 @@ SRC_RSYSLOG="${SCRIPT_DIR}/share/rsyslog.d/99-sudome.conf"
 # ── Check root ──────────────────────────────────────────────────────────
 require_root() {
     if [[ $EUID -ne 0 ]]; then
-        echo -e "${RED}${BOLD}This script must be run as root (sudo).${RESET}"
+        echo -e "${BOLD}This script must be run as root (sudo).${RESET}"
         exit 1
     fi
 }
@@ -164,10 +163,10 @@ prompt_mode() {
     echo -e ""
     echo -e "  ${BOLD}Select install mode:${RESET}"
     echo -e ""
-    echo -e "    ${GREEN}${BOLD}[1]${RESET}  ${CYAN}CLI + GUI${RESET}  — Full install (sudome, helper, daemon, system tray)"
-    echo -e "    ${YELLOW}${BOLD}[2]${RESET}  ${CYAN}CLI only${RESET}    — Headless (sudome, helper, daemon — no GUI)"
+    echo -e "    ${BOLD}[1]${RESET}  CLI + GUI  — Full install (sudome, helper, daemon, system tray)"
+    echo -e "    ${BOLD}[2]${RESET}  CLI only    — Headless (sudome, helper, daemon — no GUI)"
     echo -e ""
-    echo -ne "  ${BOLD}Choice${RESET} [${GREEN}1${RESET}/${YELLOW}2${RESET}] "
+    echo -ne "  ${BOLD}Choice${RESET} [${BOLD}1${RESET}/${BOLD}2${RESET}] "
     read -r MODE_CHOICE
     case "$MODE_CHOICE" in
         2) INSTALL_MODE="cli";;
@@ -175,9 +174,9 @@ prompt_mode() {
     esac
     echo -e ""
     if [[ "$INSTALL_MODE" == "cli" ]]; then
-        echo -e "  ${BOLD}Mode:${RESET} ${CYAN}CLI only${RESET} (sudome, helper, daemon — no GUI)"
+        echo -e "  ${BOLD}Mode:${RESET} CLI only (sudome, helper, daemon — no GUI)"
     else
-        echo -e "  ${BOLD}Mode:${RESET} ${CYAN}CLI + GUI${RESET} (full install with system tray)"
+        echo -e "  ${BOLD}Mode:${RESET} CLI + GUI (full install with system tray)"
     fi
     echo -e ""
 }
@@ -188,27 +187,27 @@ do_install() {
     
     # ── Banner ────────────────────────────────────────────────────────
     echo -e "${RESET}"
-    echo -e "${BOLD}${GREEN}    ╔══════════════════════════════════════════════════════════╗${RESET}"
-    echo -e "${BOLD}${GREEN}    ║${RESET}  ${BOLD}${CYAN}   ███████╗██╗   ██╗██████╗  ██████╗ ███╗   ███╗███████╗${BOLD}${GREEN}  ║${RESET}"
-    echo -e "${BOLD}${GREEN}    ║${RESET}  ${BOLD}${CYAN}   ██╔════╝██║   ██║██╔══██╗██╔═══██╗████╗ ████║██╔════╝${BOLD}${GREEN}  ║${RESET}"
-    echo -e "${BOLD}${GREEN}    ║${RESET}  ${BOLD}${CYAN}   ███████╗██║   ██║██║  ██║██║   ██║██╔████╔██║█████╗  ${BOLD}${GREEN}  ║${RESET}"
-    echo -e "${BOLD}${GREEN}    ║${RESET}  ${BOLD}${CYAN}   ╚════██║██║   ██║██║  ██║██║   ██║██║╚██╔╝██║██╔══╝  ${BOLD}${GREEN}  ║${RESET}"
-    echo -e "${BOLD}${GREEN}    ║${RESET}  ${BOLD}${CYAN}   ███████║╚██████╔╝██████╔╝╚██████╔╝██║ ╚═╝ ██║███████╗${BOLD}${GREEN}  ║${RESET}"
-    echo -e "${BOLD}${GREEN}    ║${RESET}  ${BOLD}${CYAN}   ╚══════╝ ╚═════╝ ╚═════╝  ╚═════╝ ╚═╝     ╚═╝╚══════╝${BOLD}${GREEN}  ║${RESET}"
-    echo -e "${BOLD}${GREEN}    ║${RESET}                                                      ${BOLD}${GREEN}║${RESET}"
-    echo -e "${BOLD}${GREEN}    ║${RESET}  ${BOLD}${RED}v2.0.0${RESET}  │  Temporary sudo privilege elevation       ${BOLD}${GREEN}║${RESET}"
-    echo -e "${BOLD}${GREEN}    ║${RESET}  ${CYAN}github.com/0xEuphonioux/SudoMe${RESET}                   ${BOLD}${GREEN}║${RESET}"
-    echo -e "${BOLD}${GREEN}    ╚══════════════════════════════════════════════════════════╝${RESET}"
+    echo -e "${BOLD}    ╔══════════════════════════════════════════════════════════╗${RESET}"
+    echo -e "${BOLD}    ║${RESET}     ███████╗██╗   ██╗██████╗  ██████╗ ███╗   ███╗███████╗  ${BOLD}║${RESET}"
+    echo -e "${BOLD}    ║${RESET}     ██╔════╝██║   ██║██╔══██╗██╔═══██╗████╗ ████║██╔════╝  ${BOLD}║${RESET}"
+    echo -e "${BOLD}    ║${RESET}     ███████╗██║   ██║██║  ██║██║   ██║██╔████╔██║█████╗    ${BOLD}║${RESET}"
+    echo -e "${BOLD}    ║${RESET}     ╚════██║██║   ██║██║  ██║██║   ██║██║╚██╔╝██║██╔══╝    ${BOLD}║${RESET}"
+    echo -e "${BOLD}    ║${RESET}     ███████║╚██████╔╝██████╔╝╚██████╔╝██║ ╚═╝ ██║███████╗  ${BOLD}║${RESET}"
+    echo -e "${BOLD}    ║${RESET}     ╚══════╝ ╚═════╝ ╚═════╝  ╚═════╝ ╚═╝     ╚═╝╚══════╝  ${BOLD}║${RESET}"
+    echo -e "${BOLD}    ║${RESET}                                                        ${BOLD}║${RESET}"
+    echo -e "${BOLD}    ║${RESET}     v2.0.0  │  Temporary sudo privilege elevation       ${BOLD}║${RESET}"
+    echo -e "${BOLD}    ║${RESET}     github.com/0xEuphonioux/SudoMe                    ${BOLD}║${RESET}"
+    echo -e "${BOLD}    ╚══════════════════════════════════════════════════════════╝${RESET}"
     echo -e ""
-    echo -e "  ${RED}▲${RESET} ${BOLD}${YELLOW}WARNING:${RESET} This script will install system-wide components."
-    echo -e "  ${RED}▲${RESET} It requires ${BOLD}root${RESET} and will modify system configuration."
+    echo -e "  ${BOLD}WARNING:${RESET} This script will install system-wide components."
+    echo -e "  It requires root and will modify system configuration."
     echo -e ""
 
     # ── Confirmation ──────────────────────────────────────────────────
-    echo -ne "  ${BOLD}Continue with install?${RESET} [${GREEN}Y${RESET}/${RED}n${RESET}] "
+    echo -ne "  ${BOLD}Continue with install?${RESET} [${BOLD}Y${RESET}/n] "
     read -r CONFIRM
     if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
-        echo -e "\n  ${YELLOW}[!]${RESET} Install cancelled."
+        echo -e "\n  [!] Install cancelled."
         exit 0
     fi
     echo -e ""
@@ -219,13 +218,13 @@ do_install() {
     install_deps
 
     echo -e ""
-    echo -e "  ${CYAN}[*]${RESET} ${BOLD}Initializing installation sequence...${RESET}"
+    echo -e "  ${BOLD}[*] Initializing installation sequence...${RESET}"
     sleep 0.3
-    echo -e "  ${GREEN}[+]${RESET} Target distro: ${BOLD}$(detect_distro)${RESET}"
+    echo -e "  [+] Target distro: $(detect_distro)"
     sleep 0.2
-    echo -e "  ${GREEN}[+]${RESET} Install prefix: ${BOLD}${INSTALL_PREFIX}${RESET}"
+    echo -e "  [+] Install prefix: ${INSTALL_PREFIX}"
     sleep 0.2
-    echo -e "  ${GREEN}[+]${RESET} Dependencies resolved"
+    echo -e "  [+] Dependencies resolved"
     sleep 0.2
     echo -e ""
 
@@ -244,34 +243,34 @@ do_install() {
     # ── Install helper ──
     info "Installing sudo helper..."
     install -m 755 "$SRC_HELPER" "${LIB_DIR}/sudome-helper"
-    ok "Helper → ${LIB_DIR}/sudome-helper"
+    ok "Helper -> ${LIB_DIR}/sudome-helper"
 
     # ── Install daemon ──
     info "Installing daemon..."
     install -m 755 "$SRC_DAEMON" "${LIB_DIR}/sudome-daemon"
-    ok "Daemon → ${LIB_DIR}/sudome-daemon"
+    ok "Daemon -> ${LIB_DIR}/sudome-daemon"
 
     # ── Install CLI ──
     info "Installing CLI..."
     install -m 755 "$SRC_CLI" "${BIN_DIR}/sudome"
-    ok "CLI → ${BIN_DIR}/sudome"
+    ok "CLI -> ${BIN_DIR}/sudome"
 
     # ── Install GUI (full mode only) ──
     if [[ "$INSTALL_MODE" == "full" ]]; then
         info "Installing GUI..."
         install -m 755 "$SRC_GUI" "${BIN_DIR}/sudome-gui"
-        ok "GUI → ${BIN_DIR}/sudome-gui"
+        ok "GUI -> ${BIN_DIR}/sudome-gui"
     fi
 
     # ── Install Polkit policy ──
     info "Installing Polkit policy..."
     install -m 644 "$SRC_POLKIT" "${POLKIT_DIR}/org.freedesktop.sudome.policy"
-    ok "Policy → ${POLKIT_DIR}/org.freedesktop.sudome.policy"
+    ok "Policy -> ${POLKIT_DIR}/org.freedesktop.sudome.policy"
 
     # ── Install D-Bus config ──
     info "Installing D-Bus config..."
     install -m 644 "$SRC_DBUS" "${DBUS_DIR}/org.freedesktop.sudome.conf"
-    ok "D-Bus config → ${DBUS_DIR}/org.freedesktop.sudome.conf"
+    ok "D-Bus config -> ${DBUS_DIR}/org.freedesktop.sudome.conf"
 
     # ── Install icons (full mode only) ──
     if [[ "$INSTALL_MODE" == "full" ]]; then
@@ -279,7 +278,7 @@ do_install() {
         install -m 644 "${SCRIPT_DIR}/share/icons/hicolor/scalable/apps/sudome-active.svg" "${ICON_DIR}/sudome-active.svg"
         install -m 644 "${SCRIPT_DIR}/share/icons/hicolor/scalable/apps/sudome-inactive.svg" "${ICON_DIR}/sudome-inactive.svg"
         install -m 644 "${SCRIPT_DIR}/share/icons/hicolor/scalable/apps/sudome-expiring.svg" "${ICON_DIR}/sudome-expiring.svg"
-        ok "Icons → ${ICON_DIR}/"
+        ok "Icons -> ${ICON_DIR}/"
     fi
 
     # ── Install systemd units ──
@@ -292,13 +291,13 @@ do_install() {
     if [[ "$INSTALL_MODE" == "full" ]]; then
         info "Installing desktop entry..."
         install -m 644 "$SRC_DESKTOP" "${APPS_DIR}/sudome.desktop"
-        ok "Desktop entry → ${APPS_DIR}/sudome.desktop"
+        ok "Desktop entry -> ${APPS_DIR}/sudome.desktop"
 
         AUTOSTART_DIR="/etc/xdg/autostart"
         if [[ -d "$AUTOSTART_DIR" ]]; then
             info "Installing autostart entry..."
             install -m 644 "$SRC_DESKTOP" "${AUTOSTART_DIR}/sudome.desktop"
-            ok "Autostart → ${AUTOSTART_DIR}/sudome.desktop"
+            ok "Autostart -> ${AUTOSTART_DIR}/sudome.desktop"
         fi
     fi
 
@@ -306,7 +305,7 @@ do_install() {
     info "Installing configuration..."
     if [[ ! -f "${ETC_DIR}/config.yaml" ]]; then
         install -m 644 "$SRC_CONFIG" "${ETC_DIR}/config.yaml"
-        ok "Config → ${ETC_DIR}/config.yaml"
+        ok "Config -> ${ETC_DIR}/config.yaml"
     else
         warn "Config already exists at ${ETC_DIR}/config.yaml (not overwritten)"
         info "Reference config: ${SRC_CONFIG}"
@@ -317,7 +316,7 @@ do_install() {
         info "Installing rsyslog forwarding config..."
         if [[ ! -f "${RSYSLOG_DIR}/99-sudome.conf" ]]; then
             install -m 644 "$SRC_RSYSLOG" "${RSYSLOG_DIR}/99-sudome.conf"
-            ok "rsyslog config → ${RSYSLOG_DIR}/99-sudome.conf"
+            ok "rsyslog config -> ${RSYSLOG_DIR}/99-sudome.conf"
             info "SudoMe events logged to /var/log/sudome.log"
             info "To forward to a remote syslog server, edit ${RSYSLOG_DIR}/99-sudome.conf"
         else
@@ -355,7 +354,7 @@ do_install() {
     else
         info "Each user should run:"
     fi
-    echo -e "       ${CYAN}systemctl --user enable --now sudome-daemon.service${RESET}"
+    echo -e "       systemctl --user enable --now sudome-daemon.service"
     
     info "Restarting polkit..."
     systemctl restart polkit 2>/dev/null || service polkit restart 2>/dev/null || true
@@ -365,17 +364,17 @@ do_install() {
 
     # ── Done ──
     echo
-    echo -e "  ${GREEN}[✓]${RESET} Polkit policy registered"
-    echo -e "  ${GREEN}[✓]${RESET} D-Bus configuration loaded"
-    echo -e "  ${GREEN}[✓]${RESET} systemd daemon deployed"
+    echo -e "  [OK] Polkit policy registered"
+    echo -e "  [OK] D-Bus configuration loaded"
+    echo -e "  [OK] systemd daemon deployed"
     echo -e ""
-    echo -e "${BOLD}${GREEN}    ╔══════════════════════════════════════════════════════════╗${RESET}"
-    echo -e "${BOLD}${GREEN}    ║${RESET}                                                      ${BOLD}${GREEN}║${RESET}"
-    echo -e "${BOLD}${GREEN}    ║${RESET}         ${BOLD}SudoMe v2.0.0 installed successfully${RESET}          ${BOLD}${GREEN}║${RESET}"
-    echo -e "${BOLD}${GREEN}    ║${RESET}                                                      ${BOLD}${GREEN}║${RESET}"
-    echo -e "${BOLD}${GREEN}    ╚══════════════════════════════════════════════════════════╝${RESET}"
+    echo -e "${BOLD}    ╔══════════════════════════════════════════════════════════╗${RESET}"
+    echo -e "${BOLD}    ║${RESET}                                                      ${BOLD}║${RESET}"
+    echo -e "${BOLD}    ║${RESET}           SudoMe v2.0.0 installed successfully            ${BOLD}║${RESET}"
+    echo -e "${BOLD}    ║${RESET}                                                      ${BOLD}║${RESET}"
+    echo -e "${BOLD}    ╚══════════════════════════════════════════════════════════╝${RESET}"
     echo
-    echo -e "  ${BOLD}${CYAN}COMMANDS${RESET}"
+    echo -e "  ${BOLD}COMMANDS${RESET}"
     echo -e "  ─────────────────────────────────────────────"
     echo -e "  ${BOLD}sudome on${RESET}                     Grant 30 min sudo"
     echo -e "  ${BOLD}sudome on 60 -r \"Installing Docker\"${RESET}  Grant 60 min + reason"
@@ -383,19 +382,19 @@ do_install() {
     echo -e "  ${BOLD}sudome off${RESET}                   Revoke immediately"
     echo -e "  ${BOLD}sudome renew${RESET}                 Extend current grant"
     echo
-    echo -e "  ${BOLD}${RED}AUTO-REVOCATION TRIGGERS${RESET}"
+    echo -e "  ${BOLD}AUTO-REVOCATION TRIGGERS${RESET}"
     echo -e "  ─────────────────────────────────────────────"
-    echo -e "    ${CYAN}Screen lock${RESET}         → sudo revoked"
-    echo -e "    ${CYAN}System sleep${RESET}        → sudo revoked"
-    echo -e "    ${CYAN}Time/date change${RESET}     → sudo revoked"
-    echo -e "    ${CYAN}Shutdown/restart${RESET}     → sudo revoked (all users)"
-    echo -e "    ${CYAN}Timer expiry${RESET}         → sudo revoked"
+    echo -e "    Screen lock         -> sudo revoked"
+    echo -e "    System sleep        -> sudo revoked"
+    echo -e "    Time/date change    -> sudo revoked"
+    echo -e "    Shutdown/restart    -> sudo revoked (all users)"
+    echo -e "    Timer expiry        -> sudo revoked"
     echo
     if [[ "$INSTALL_MODE" == "full" ]]; then
-        echo -e "  ${BOLD}${GREEN}GUI${RESET}"
+        echo -e "  ${BOLD}GUI${RESET}"
         echo -e "  ─────────────────────────────────────────────"
         echo -e "  ${BOLD}sudome-gui${RESET}                  Launch system tray app"
-        echo -e "  ${CYAN}Auto-starts on login${RESET}        via /etc/xdg/autostart/"
+        echo -e "  Auto-starts on login        via /etc/xdg/autostart/"
         echo
     fi
 }
