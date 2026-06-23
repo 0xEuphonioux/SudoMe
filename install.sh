@@ -3,12 +3,15 @@
 # Installs all components for temporary sudo privilege elevation.
 #
 # Usage:
-#   sudo ./install.sh              # Full install (system-wide)
-#   sudo ./install.sh --uninstall   # Remove SudoMe
+#   sudo ./install.sh              # Full install (CLI + GUI, system-wide)
+#   sudo ./install.sh --cli-only   # CLI only (no GUI, no GTK deps)
+#   sudo ./install.sh --uninstall  # Remove SudoMe
 #
 # SPDX-License-Identifier: Apache-2.0
 
 set -euo pipefail
+
+INSTALL_MODE="full"  # "full" or "cli"
 
 # ── Colors ──────────────────────────────────────────────────────────────
 RED='\033[91m'; GREEN='\033[92m'; YELLOW='\033[93m'; CYAN='\033[96m'
@@ -69,36 +72,43 @@ detect_distro() {
 install_deps() {
     local distro
     distro=$(detect_distro)
+    local mode_label="CLI + GUI"
+    [[ "$INSTALL_MODE" == "cli" ]] && mode_label="CLI only"
     
-    header "Installing dependencies for $distro"
+    header "Installing dependencies for $distro ($mode_label)"
 
     case "$distro" in
         ubuntu|debian|pop|linuxmint|elementary|zorin)
             info "Detected Debian-based distro"
             apt-get update -qq
             
-            # Detect Ubuntu version for AppIndicator package
-            APPINDICATOR_PKG="gir1.2-appindicator3-0.1"
-            if [[ -f /etc/os-release ]]; then
-                . /etc/os-release
-                if [[ "$ID" == "ubuntu" ]] && [[ "${VERSION_ID%.*}" -ge 24 ]]; then
-                    APPINDICATOR_PKG="gir1.2-ayatanaappindicator3-0.1"
-                fi
-            fi
-            
+            # CLI dependencies (always installed)
             apt-get install -y -qq \
                 python3 \
                 python3-gi \
                 python3-dbus \
-                gir1.2-gtk-3.0 \
-                "$APPINDICATOR_PKG" \
-                gir1.2-notify-0.7 \
                 python3-yaml \
                 policykit-1 \
                 pkexec \
                 libpolkit-agent-1-0 \
                 dbus \
                 2>&1 | grep -v "^$" || true
+            
+            # GUI dependencies (only for full install)
+            if [[ "$INSTALL_MODE" == "full" ]]; then
+                local APPINDICATOR_PKG="gir1.2-appindicator3-0.1"
+                if [[ -f /etc/os-release ]]; then
+                    . /etc/os-release
+                    if [[ "$ID" == "ubuntu" ]] && [[ "${VERSION_ID%.*}" -ge 24 ]]; then
+                        APPINDICATOR_PKG="gir1.2-ayatanaappindicator3-0.1"
+                    fi
+                fi
+                apt-get install -y -qq \
+                    gir1.2-gtk-3.0 \
+                    "$APPINDICATOR_PKG" \
+                    gir1.2-notify-0.7 \
+                    2>&1 | grep -v "^$" || true
+            fi
             ;;
         fedora|rhel|centos|rocky|almalinux)
             info "Detected RHEL-based distro"
@@ -170,6 +180,21 @@ do_install() {
     echo -e "  ${RED}▲${RESET} ${BOLD}${YELLOW}WARNING:${RESET} This script will install system-wide components."
     echo -e "  ${RED}▲${RESET} It requires ${BOLD}root${RESET} and will modify system configuration."
     echo -e ""
+    if [[ "$INSTALL_MODE" == "cli" ]]; then
+        echo -e "  ${BOLD}Mode:${RESET} ${CYAN}CLI only${RESET} (sudome, helper, daemon — no GUI)"
+    else
+        echo -e "  ${BOLD}Mode:${RESET} ${CYAN}CLI + GUI${RESET} (full install with system tray)"
+    fi
+    echo -e ""
+
+    # ── Confirmation ──────────────────────────────────────────────────
+    echo -ne "  ${BOLD}Continue with install?${RESET} [${GREEN}Y${RESET}/${RED}n${RESET}] "
+    read -r CONFIRM
+    if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+        echo -e "\n  ${YELLOW}[!]${RESET} Install cancelled."
+        exit 0
+    fi
+    echo -e ""
 
     install_deps
 
@@ -191,7 +216,10 @@ do_install() {
     # ── Create directories ──
     info "Creating directories..."
     mkdir -p "$LIB_DIR" "$ETC_DIR" "$STATE_DIR" "$POLKIT_DIR" \
-             "$DBUS_DIR" "$SYSTEMD_USER_DIR" "$ICON_DIR" "$APPS_DIR"
+             "$DBUS_DIR" "$SYSTEMD_USER_DIR"
+    if [[ "$INSTALL_MODE" == "full" ]]; then
+        mkdir -p "$ICON_DIR" "$APPS_DIR"
+    fi
 
     # ── Install helper ──
     info "Installing sudo helper..."
@@ -208,10 +236,12 @@ do_install() {
     install -m 755 "$SRC_CLI" "${BIN_DIR}/sudome"
     ok "CLI → ${BIN_DIR}/sudome"
 
-    # ── Install GUI ──
-    info "Installing GUI..."
-    install -m 755 "$SRC_GUI" "${BIN_DIR}/sudome-gui"
-    ok "GUI → ${BIN_DIR}/sudome-gui"
+    # ── Install GUI (full mode only) ──
+    if [[ "$INSTALL_MODE" == "full" ]]; then
+        info "Installing GUI..."
+        install -m 755 "$SRC_GUI" "${BIN_DIR}/sudome-gui"
+        ok "GUI → ${BIN_DIR}/sudome-gui"
+    fi
 
     # ── Install Polkit policy ──
     info "Installing Polkit policy..."
@@ -223,12 +253,14 @@ do_install() {
     install -m 644 "$SRC_DBUS" "${DBUS_DIR}/org.freedesktop.sudome.conf"
     ok "D-Bus config → ${DBUS_DIR}/org.freedesktop.sudome.conf"
 
-    # ── Install icons ──
-    info "Installing tray icons..."
-    install -m 644 "${SCRIPT_DIR}/share/icons/hicolor/scalable/apps/sudome-active.svg" "${ICON_DIR}/sudome-active.svg"
-    install -m 644 "${SCRIPT_DIR}/share/icons/hicolor/scalable/apps/sudome-inactive.svg" "${ICON_DIR}/sudome-inactive.svg"
-    install -m 644 "${SCRIPT_DIR}/share/icons/hicolor/scalable/apps/sudome-expiring.svg" "${ICON_DIR}/sudome-expiring.svg"
-    ok "Icons → ${ICON_DIR}/"
+    # ── Install icons (full mode only) ──
+    if [[ "$INSTALL_MODE" == "full" ]]; then
+        info "Installing tray icons..."
+        install -m 644 "${SCRIPT_DIR}/share/icons/hicolor/scalable/apps/sudome-active.svg" "${ICON_DIR}/sudome-active.svg"
+        install -m 644 "${SCRIPT_DIR}/share/icons/hicolor/scalable/apps/sudome-inactive.svg" "${ICON_DIR}/sudome-inactive.svg"
+        install -m 644 "${SCRIPT_DIR}/share/icons/hicolor/scalable/apps/sudome-expiring.svg" "${ICON_DIR}/sudome-expiring.svg"
+        ok "Icons → ${ICON_DIR}/"
+    fi
 
     # ── Install systemd units ──
     info "Installing systemd user units..."
@@ -236,17 +268,18 @@ do_install() {
     install -m 644 "$SRC_TIMER" "${SYSTEMD_USER_DIR}/sudome-daemon.timer"
     ok "systemd units installed"
 
-    # ── Install desktop entry ──
-    info "Installing desktop entry..."
-    install -m 644 "$SRC_DESKTOP" "${APPS_DIR}/sudome.desktop"
-    ok "Desktop entry → ${APPS_DIR}/sudome.desktop"
+    # ── Install desktop + autostart (full mode only) ──
+    if [[ "$INSTALL_MODE" == "full" ]]; then
+        info "Installing desktop entry..."
+        install -m 644 "$SRC_DESKTOP" "${APPS_DIR}/sudome.desktop"
+        ok "Desktop entry → ${APPS_DIR}/sudome.desktop"
 
-    # ── Install autostart entry (launches on login) ──
-    AUTOSTART_DIR="/etc/xdg/autostart"
-    if [[ -d "$AUTOSTART_DIR" ]]; then
-        info "Installing autostart entry..."
-        install -m 644 "$SRC_DESKTOP" "${AUTOSTART_DIR}/sudome.desktop"
-        ok "Autostart → ${AUTOSTART_DIR}/sudome.desktop"
+        AUTOSTART_DIR="/etc/xdg/autostart"
+        if [[ -d "$AUTOSTART_DIR" ]]; then
+            info "Installing autostart entry..."
+            install -m 644 "$SRC_DESKTOP" "${AUTOSTART_DIR}/sudome.desktop"
+            ok "Autostart → ${AUTOSTART_DIR}/sudome.desktop"
+        fi
     fi
 
     # ── Install config ──
@@ -338,11 +371,13 @@ do_install() {
     echo -e "    ${CYAN}Shutdown/restart${RESET}     → sudo revoked (all users)"
     echo -e "    ${CYAN}Timer expiry${RESET}         → sudo revoked"
     echo
-    echo -e "  ${BOLD}${GREEN}GUI${RESET}"
-    echo -e "  ─────────────────────────────────────────────"
-    echo -e "  ${BOLD}sudome-gui${RESET}                  Launch system tray app"
-    echo -e "  ${CYAN}Auto-starts on login${RESET}        via /etc/xdg/autostart/"
-    echo
+    if [[ "$INSTALL_MODE" == "full" ]]; then
+        echo -e "  ${BOLD}${GREEN}GUI${RESET}"
+        echo -e "  ─────────────────────────────────────────────"
+        echo -e "  ${BOLD}sudome-gui${RESET}                  Launch system tray app"
+        echo -e "  ${CYAN}Auto-starts on login${RESET}        via /etc/xdg/autostart/"
+        echo
+    fi
 }
 
 # ── Uninstall SudoMe ───────────────────────────────────────────────────
@@ -389,11 +424,24 @@ case "${1:-}" in
     --uninstall|-u|remove)
         do_uninstall
         ;;
+    --cli-only|-c)
+        INSTALL_MODE="cli"
+        do_install
+        ;;
     --help|-h)
-        echo "Usage: sudo ./install.sh [--uninstall]"
+        echo "SudoMe v2.0.0 — Temporary sudo privilege elevation for Linux"
         echo ""
-        echo "  (no args)    Install SudoMe system-wide"
-        echo "  --uninstall  Remove SudoMe"
+        echo "Usage: sudo ./install.sh [OPTION]"
+        echo ""
+        echo "  (no args)       Full install (CLI + GUI)"
+        echo "  --cli-only, -c  CLI only (no GUI, no GTK deps)"
+        echo "  --uninstall, -u Remove SudoMe"
+        echo "  --help, -h      Show this help"
+        echo ""
+        echo "Examples:"
+        echo "  sudo ./install.sh               # Everything"
+        echo "  sudo ./install.sh --cli-only    # Headless/server"
+        echo "  sudo ./install.sh --uninstall   # Remove all"
         ;;
     *)
         do_install
