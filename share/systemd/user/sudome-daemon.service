@@ -2,11 +2,18 @@
 Description=SudoMe — Temporary sudo elevation daemon
 Documentation=https://github.com/0xEuphonioux/SudoMe
 After=default.target
+PartOf=graphical-session.target
 
 [Service]
-Type=oneshot
+Type=simple
 ExecStart=/usr/lib/sudome/sudome-daemon
+ExecStop=/usr/lib/sudome/sudome-daemon --shutdown
+Restart=on-failure
+RestartSec=5
 Nice=19
 IOSchedulingClass=idle
 StandardOutput=journal
 StandardError=journal
+
+[Install]
+WantedBy=default.target

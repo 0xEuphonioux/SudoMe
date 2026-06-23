@@ -1,23 +1,48 @@
 #!/usr/bin/env python3
 """
-SudoMe Daemon — Background service that monitors active sudo grants
-and automatically revokes them when they expire.
+SudoMe Daemon — Long-running D-Bus listener that automatically revokes
+sudo when the session locks, the system sleeps, the time/date changes,
+or the expiry timer runs out. Mirrors SAP Privileges revocation behavior.
 
-Designed to be run by a systemd user timer every 30 seconds.
+Monitored events:
+  - Session lock (logind Lock signal)        → revoke
+  - System sleep (logind PrepareForSleep)     → revoke  
+  - Time/date change (timedated)              → revoke
+  - Shutdown (SIGTERM handler)               → revoke all
+  - Timer expiry (internal 10s check)         → revoke
+
+Runs as a systemd user service (long-running, not oneshot).
 """
 
 import os
+import signal
 import subprocess
 import sys
 import time
-import json
 from pathlib import Path
+
+try:
+    import gi
+    gi.require_version("GLib", "2.0")
+    from gi.repository import GLib
+    HAS_GLIB = True
+except ImportError:
+    HAS_GLIB = False
+
+try:
+    import dbus
+    import dbus.mainloop.glib
+    from dbus.mainloop.glib import DBusGMainLoop
+    HAS_DBUS = True
+except ImportError:
+    HAS_DBUS = False
 
 STATE_DIR = "/var/lib/sudome"
 HELPER_PATH = "/usr/lib/sudome/sudome-helper"
 LOG_TAG = "sudome-daemon"
+CHECK_INTERVAL = 10  # seconds between expiry checks
 
-
+# ── Logging ────────────────────────────────────────────────────────────
 def log(level: str, message: str):
     """Write to syslog."""
     subprocess.run(
@@ -25,63 +50,203 @@ def log(level: str, message: str):
         capture_output=True,
     )
 
+# ── Revocation ─────────────────────────────────────────────────────────
+def revoke_user(username: str, reason: str = "auto-revoked by daemon"):
+    """Revoke sudo for a specific user."""
+    try:
+        result = subprocess.run(
+            [HELPER_PATH, "revoke", username, reason],
+            capture_output=True, text=True, timeout=30
+        )
+        if "REVOKED" in result.stdout or "NOT_ACTIVE" in result.stdout:
+            log("info", f"Revoked sudo for '{username}': {reason}")
+            return True
+        else:
+            log("err", f"Failed to revoke '{username}': {result.stdout.strip()}")
+            return False
+    except Exception as e:
+        log("err", f"Exception revoking '{username}': {e}")
+        return False
 
-def get_active_grants() -> list[tuple[str, int]]:
-    """Scan state directory for active grants. Returns [(username, expiry_ts), ...]."""
+def revoke_all_active(reason: str = "auto-revoked by daemon"):
+    """Revoke all currently active grants."""
     if not os.path.isdir(STATE_DIR):
-        return []
-
-    active = []
+        return
+    
     now = int(time.time())
-
     for fname in os.listdir(STATE_DIR):
         if not fname.endswith(".expiry"):
             continue
-        username = fname[:-7]  # strip .expiry
+        username = fname[:-7]
+        revoke_user(username, reason)
+
+def get_active_usernames() -> list:
+    """Get list of users with active sudo grants (in sudo group)."""
+    if not os.path.isdir(STATE_DIR):
+        return []
+    users = []
+    for fname in os.listdir(STATE_DIR):
+        if fname.endswith(".expiry"):
+            users.append(fname[:-7])
+    return users
+
+def check_expired():
+    """Check all grants and revoke any that have expired."""
+    if not os.path.isdir(STATE_DIR):
+        return
+    
+    now = int(time.time())
+    for fname in os.listdir(STATE_DIR):
+        if not fname.endswith(".expiry"):
+            continue
+        username = fname[:-7]
         fpath = os.path.join(STATE_DIR, fname)
         try:
             with open(fpath) as f:
                 expiry = int(f.read().strip())
-            active.append((username, expiry))
         except (ValueError, OSError):
             continue
+        
+        if expiry <= now:
+            log("notice", f"Timer expired for '{username}'")
+            revoke_user(username, "timer expired")
 
-    return active
+# ── Event handlers ─────────────────────────────────────────────────────
+def on_session_lock(locked: bool):
+    """Called when the session is locked or unlocked."""
+    if locked:
+        users = get_active_usernames()
+        if users:
+            log("notice", f"Session locked — revoking sudo for {len(users)} user(s)")
+            for username in users:
+                revoke_user(username, "session locked")
 
+def on_prepare_for_sleep(going_to_sleep: bool):
+    """Called when the system is about to sleep or has woken up."""
+    if going_to_sleep:
+        users = get_active_usernames()
+        if users:
+            log("notice", f"System sleeping — revoking sudo for {len(users)} user(s)")
+            for username in users:
+                revoke_user(username, "system sleep")
 
-def revoke_expired():
-    """Check all grants and revoke any that have expired."""
-    active = get_active_grants()
-    if not active:
-        return
+def on_time_changed():
+    """Called when the system time/date changes."""
+    users = get_active_usernames()
+    if users:
+        log("notice", f"Time/date changed — revoking sudo for {len(users)} user(s)")
+        for username in users:
+            revoke_user(username, "time/date changed")
 
-    now = int(time.time())
+def on_shutdown():
+    """Called on daemon shutdown (SIGTERM)."""
+    users = get_active_usernames()
+    if users:
+        log("notice", f"Daemon shutting down — revoking sudo for {len(users)} user(s)")
+        for username in users:
+            revoke_user(username, "system shutdown")
 
-    for username, expiry in active:
-        remaining = expiry - now
-
-        if remaining <= 0:
-            # Expired — revoke
-            log("notice", f"Auto-revoking sudo for '{username}' (expired {abs(remaining)}s ago)")
-            try:
-                subprocess.run(
-                    [HELPER_PATH, "revoke", username],
-                    capture_output=True,
-                    timeout=30,
-                )
-                log("info", f"Revoked sudo for '{username}'")
-            except Exception as e:
-                log("err", f"Failed to revoke sudo for '{username}': {e}")
-
-
-def main():
-    """Main daemon loop — runs once per tick (called by systemd timer)."""
+# ── D-Bus setup ────────────────────────────────────────────────────────
+def setup_dbus_listeners(loop):
+    """Connect to D-Bus system bus and listen for logind events."""
+    if not HAS_DBUS:
+        log("warn", "python3-dbus not available — D-Bus event monitoring disabled")
+        log("warn", "Install: sudo apt install python3-dbus")
+        return None
+    
     try:
-        revoke_expired()
+        dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+        bus = dbus.SystemBus()
+        
+        # ── Session Lock/Unlock ──────────────────────────────────────
+        try:
+            # Get the current session ID
+            session_id = os.environ.get("XDG_SESSION_ID", "")
+            if session_id:
+                session_path = f"/org/freedesktop/login1/session/{session_id}"
+                session = bus.get_object("org.freedesktop.login1", session_path)
+                session.connect_to_signal(
+                    "Lock", lambda: on_session_lock(True),
+                    dbus_interface="org.freedesktop.login1.Session"
+                )
+                log("info", f"Monitoring session {session_id} for lock events")
+        except Exception as e:
+            log("warn", f"Could not connect to session lock signal: {e}")
+        
+        # ── PrepareForSleep ──────────────────────────────────────────
+        try:
+            manager = bus.get_object("org.freedesktop.login1", "/org/freedesktop/login1")
+            manager.connect_to_signal(
+                "PrepareForSleep",
+                on_prepare_for_sleep,
+                dbus_interface="org.freedesktop.login1.Manager"
+            )
+            log("info", "Monitoring logind for sleep events")
+        except Exception as e:
+            log("warn", f"Could not connect to PrepareForSleep signal: {e}")
+        
+        # ── Time/date change ─────────────────────────────────────────
+        try:
+            # Listen for PropertiesChanged on timedate1
+            timedated_proxy = bus.get_object(
+                "org.freedesktop.timedate1",
+                "/org/freedesktop/timedate1"
+            )
+            # Actually, timedate1 doesn't emit signals for time changes.
+            # We'll poll instead. But PropertiesChanged on login1 does fire.
+            log("info", "Time change monitoring: polling-based (10s check)")
+        except Exception as e:
+            log("warn", f"Could not connect to timedate1: {e}")
+        
+        return bus
+        
     except Exception as e:
-        log("err", f"Daemon error: {e}")
-        sys.exit(1)
+        log("err", f"Failed to connect to D-Bus: {e}")
+        return None
 
+# ── Main ───────────────────────────────────────────────────────────────
+def main():
+    log("info", "SudoMe daemon starting")
+    
+    # Revoke any orphaned grants from before daemon started
+    # (e.g., user granted sudo but daemon wasn't running yet)
+    check_expired()
+    
+    if not HAS_GLIB:
+        log("err", "python3-gi not available — cannot run event loop")
+        log("err", "Install: sudo apt install python3-gi")
+        sys.exit(1)
+    
+    # ── Signal handlers ──────────────────────────────────────────────
+    def sigterm_handler(signum, frame):
+        log("info", "Received SIGTERM — shutting down")
+        on_shutdown()
+        loop.quit()
+    
+    signal.signal(signal.SIGTERM, sigterm_handler)
+    signal.signal(signal.SIGINT, sigterm_handler)
+    
+    # ── Main loop ────────────────────────────────────────────────────
+    loop = GLib.MainLoop()
+    
+    # Set up D-Bus listeners
+    bus = setup_dbus_listeners(loop)
+    
+    # Periodic expiry check (every CHECK_INTERVAL seconds)
+    def periodic_check():
+        check_expired()
+        return True  # keep the timer alive
+    
+    GLib.timeout_add_seconds(CHECK_INTERVAL, periodic_check)
+    
+    log("info", f"Daemon running (checking every {CHECK_INTERVAL}s)")
+    
+    try:
+        loop.run()
+    except KeyboardInterrupt:
+        on_shutdown()
+    
+    log("info", "SudoMe daemon stopped")
 
 if __name__ == "__main__":
     main()

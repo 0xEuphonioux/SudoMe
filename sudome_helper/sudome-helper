@@ -4,8 +4,8 @@
 # This script runs as root.
 #
 # Usage:
-#   sudome-helper grant <username> <minutes>
-#   sudome-helper revoke <username>
+#   sudome-helper grant <username> <minutes> [reason]
+#   sudome-helper revoke <username> [reason]
 #   sudome-helper status <username>
 #
 # SPDX-License-Identifier: Apache-2.0
@@ -14,7 +14,8 @@ set -euo pipefail
 
 ACTION="${1:-}"
 USERNAME="${2:-}"
-MINUTES="${3:-}"
+ARG3="${3:-}"
+ARG4="${4:-}"
 
 # ── Configuration ──────────────────────────────────────────────────────
 SUDO_GROUP="${SUDO_GROUP:-sudo}"
@@ -36,10 +37,38 @@ validate_user() {
     fi
 }
 
+# ── Send desktop notification (as the user, not root) ──────────────────
+notify_user() {
+    local username="$1"
+    local title="$2"
+    local message="$3"
+    local urgency="${4:-normal}"
+    
+    # Send notification as the target user via their D-Bus session bus
+    local uid
+    uid=$(id -u "$username" 2>/dev/null) || return 0
+    
+    # Find the user's D-Bus session address
+    local dbus_addr
+    dbus_addr=$(cat "/run/user/${uid}/bus" 2>/dev/null || true)
+    
+    if [[ -n "$dbus_addr" ]] && command -v gdbus &>/dev/null; then
+        DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" \
+        gdbus call --session \
+            --dest org.freedesktop.Notifications \
+            --object-path /org/freedesktop/Notifications \
+            --method org.freedesktop.Notifications.Notify \
+            "sudome" 0 "sudome" "$title" "$message" \
+            '[]' '{"urgency": <'"$([[ "$urgency" == "critical" ]] && echo 2 || echo 1)"'>}' \
+            -1 2>/dev/null || true
+    fi
+}
+
 # ── Grant sudo ─────────────────────────────────────────────────────────
 cmd_grant() {
     validate_user
-    local minutes="${MINUTES:-30}"
+    local minutes="${ARG3:-30}"
+    local reason="${ARG4:-}"
 
     # Check if already in sudo group
     if groups "$USERNAME" | grep -qw "$SUDO_GROUP"; then
@@ -59,13 +88,30 @@ cmd_grant() {
         echo "$expiry" > "${STATE_DIR}/${USERNAME}.expiry"
         chmod 600 "${STATE_DIR}/${USERNAME}.expiry"
 
-        # Write syslog audit event (same format as SAP Privileges)
+        # Write syslog audit event
         local now=$(date '+%m/%d/%Y %I:%M:%S %p')
-        log notice "GRANT: user='$USERNAME' minutes=$minutes expiry=$expiry"
+        local log_msg="GRANT: user='$USERNAME' minutes=$minutes expiry=$expiry"
+        if [[ -n "$reason" ]]; then
+            log_msg="$log_msg reason='$reason'"
+        fi
+        log notice "$log_msg"
 
-        # Also write structured event to syslog
-        logger -t "$LOG_TAG" -p auth.notice \
-            "Process sudome created at $now by user $USERNAME in session $(loginctl list-sessions --no-legend 2>/dev/null | grep "$USERNAME" | awk '{print $1}' | head -1 || echo '?') with an elevation type of Default. action: 'grant' minutes: '$minutes'"
+        # Structured event for SIEM (matching SAP Privileges format)
+        local structured_msg="Process sudome created at $now by user $USERNAME in session $(loginctl list-sessions --no-legend 2>/dev/null | grep "$USERNAME" | awk '{print $1}' | head -1 || echo '?') with an elevation type of Default. action: 'grant' minutes: '$minutes'"
+        if [[ -n "$reason" ]]; then
+            structured_msg="$structured_msg reason: '$reason'"
+        fi
+        logger -t "$LOG_TAG" -p auth.notice "$structured_msg"
+
+        # Desktop notification
+        local notify_msg="You now have administrator privileges for ${minutes} minutes."
+        if [[ -n "$reason" ]]; then
+            notify_msg="$notify_msg Reason: $reason"
+        fi
+        notify_user "$USERNAME" \
+            "🔓 Administrator Privileges Granted" \
+            "With great power comes great responsibility. ${notify_msg}" \
+            "normal"
 
         echo "GRANTED $minutes $expiry"
     else
@@ -78,6 +124,7 @@ cmd_grant() {
 # ── Revoke sudo ────────────────────────────────────────────────────────
 cmd_revoke() {
     validate_user
+    local reason="${ARG3:-}"
 
     # Check if in sudo group
     if ! groups "$USERNAME" | grep -qw "$SUDO_GROUP"; then
@@ -92,10 +139,24 @@ cmd_revoke() {
         rm -f "${STATE_DIR}/${USERNAME}.expiry"
 
         local now=$(date '+%m/%d/%Y %I:%M:%S %p')
-        log notice "REVOKE: user='$USERNAME'"
+        local log_msg="REVOKE: user='$USERNAME'"
+        if [[ -n "$reason" ]]; then
+            log_msg="$log_msg reason='$reason'"
+        fi
+        log notice "$log_msg"
 
         logger -t "$LOG_TAG" -p auth.notice \
             "Administrator privileges have been revoked for user $USERNAME at $now."
+
+        # Desktop notification
+        local notify_msg="Your elevation has expired. You have been demoted back to a standard user."
+        if [[ -n "$reason" ]]; then
+            notify_msg="$notify_msg ($reason)"
+        fi
+        notify_user "$USERNAME" \
+            "🔒 Administrator Privileges Revoked" \
+            "$notify_msg" \
+            "normal"
 
         echo "REVOKED"
     else
@@ -131,7 +192,7 @@ case "$ACTION" in
     revoke) cmd_revoke ;;
     status) cmd_status ;;
     *)
-        echo "ERROR: Unknown action '$ACTION'. Use: grant|revoke|status <username> [minutes]"
+        echo "ERROR: Unknown action '$ACTION'. Use: grant|revoke|status <username> [minutes] [reason]"
         exit 1
         ;;
 esac

@@ -48,7 +48,7 @@ def yellow(s): return f"{Colors.YELLOW}{s}{Colors.RESET}"
 def cyan(s):  return f"{Colors.CYAN}{s}{Colors.RESET}"
 
 # ── Helpers ────────────────────────────────────────────────────────────
-def run_helper(action: str, minutes: int = 0) -> tuple[int, str]:
+def run_helper(action: str, minutes: int = 0, reason: str = "") -> tuple[int, str]:
     """Run the Polkit helper, returning (exit_code, output)."""
     username = os.environ.get("SUDO_USER", os.environ.get("USER", ""))
     if not username:
@@ -57,6 +57,14 @@ def run_helper(action: str, minutes: int = 0) -> tuple[int, str]:
     cmd = [PKEXEC, HELPER_PATH, action, username]
     if action == "grant" and minutes > 0:
         cmd.append(str(minutes))
+        if reason:
+            cmd.append(reason)
+    elif action == "revoke" and reason:
+        cmd.append(reason)
+    elif action == "grant" and reason and minutes == 0:
+        # minutes wasn't specified but reason was
+        cmd.append("30")
+        cmd.append(reason)
 
     try:
         result = subprocess.run(
@@ -116,7 +124,7 @@ def cmd_status():
     else:
         print(f"  {red('✗')} {red(state)}")
 
-def cmd_on(minutes: int = 30):
+def cmd_on(minutes: int = 30, reason: str = ""):
     """Request temporary sudo access."""
     if minutes < 1:
         print(red("Minutes must be at least 1"))
@@ -130,7 +138,9 @@ def cmd_on(minutes: int = 30):
         sys.exit(0)
 
     print(f"Requesting sudo for {bold(str(minutes))} minutes...")
-    ret, output = run_helper("grant", minutes)
+    if reason:
+        print(f"  Reason: {reason}")
+    ret, output = run_helper("grant", minutes, reason)
 
     if ret == 0 and output.startswith("GRANTED"):
         parts = output.split()
@@ -152,7 +162,7 @@ def cmd_on(minutes: int = 30):
         print(red(f"Failed to grant sudo: {output}"))
         sys.exit(1)
 
-def cmd_off():
+def cmd_off(reason: str = ""):
     """Revoke sudo immediately."""
     state, remaining, _ = get_status()
 
@@ -165,7 +175,7 @@ def cmd_off():
     else:
         print("Revoking sudo...")
 
-    ret, output = run_helper("revoke")
+    ret, output = run_helper("revoke", reason=reason)
 
     if ret == 0 and "REVOKED" in output:
         print(f"  {green('✓')} {bold('Sudo revoked')}")
@@ -176,7 +186,7 @@ def cmd_off():
         print(red(f"Failed to revoke sudo: {output}"))
         sys.exit(1)
 
-def cmd_renew(minutes: int = 30):
+def cmd_renew(minutes: int = 30, reason: str = ""):
     """Extend current sudo grant."""
     state, remaining, expiry = get_status()
 
@@ -186,7 +196,7 @@ def cmd_renew(minutes: int = 30):
         sys.exit(1)
 
     print(f"Extending sudo by {bold(str(minutes))} more minutes...")
-    ret, output = run_helper("grant", minutes)
+    ret, output = run_helper("grant", minutes, reason)
 
     if ret == 0 and output.startswith("GRANTED"):
         parts = output.split()
@@ -219,21 +229,27 @@ Examples:
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
-    # sudome on [minutes]
+    # sudome on [minutes] [--reason "..."]
     on_parser = subparsers.add_parser("on", help="Grant temporary sudo access")
     on_parser.add_argument("minutes", nargs="?", type=int, default=30,
                           help="Duration in minutes (default: 30)")
+    on_parser.add_argument("--reason", "-r", type=str, default="",
+                          help="Reason for requesting admin privileges")
 
-    # sudome off
-    subparsers.add_parser("off", help="Revoke temporary sudo access")
+    # sudome off [--reason "..."]
+    off_parser = subparsers.add_parser("off", help="Revoke temporary sudo access")
+    off_parser.add_argument("--reason", "-r", type=str, default="",
+                           help="Reason for revoking early")
 
     # sudome status
     subparsers.add_parser("status", aliases=["st"], help="Show current sudo status")
 
-    # sudome renew [minutes]
+    # sudome renew [minutes] [--reason "..."]
     renew_parser = subparsers.add_parser("renew", help="Extend current sudo grant")
     renew_parser.add_argument("minutes", nargs="?", type=int, default=30,
                              help="Additional minutes (default: 30)")
+    renew_parser.add_argument("--reason", "-r", type=str, default="",
+                             help="Reason for extending")
 
     args = parser.parse_args()
 
@@ -241,13 +257,13 @@ Examples:
         # Default: show status
         cmd_status()
     elif args.command == "on":
-        cmd_on(args.minutes)
+        cmd_on(args.minutes, args.reason)
     elif args.command == "off":
-        cmd_off()
+        cmd_off(args.reason)
     elif args.command in ("status", "st"):
         cmd_status()
     elif args.command == "renew":
-        cmd_renew(args.minutes)
+        cmd_renew(args.minutes, args.reason)
 
 if __name__ == "__main__":
     main()

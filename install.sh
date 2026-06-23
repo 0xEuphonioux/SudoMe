@@ -89,6 +89,7 @@ install_deps() {
             apt-get install -y -qq \
                 python3 \
                 python3-gi \
+                python3-dbus \
                 gir1.2-gtk-3.0 \
                 "$APPINDICATOR_PKG" \
                 gir1.2-notify-0.7 \
@@ -96,6 +97,7 @@ install_deps() {
                 policykit-1 \
                 pkexec \
                 libpolkit-agent-1-0 \
+                dbus \
                 2>&1 | grep -v "^$" || true
             ;;
         fedora|rhel|centos|rocky|almalinux)
@@ -246,10 +248,24 @@ do_install() {
     info "Reloading systemd user daemon..."
     systemctl --user daemon-reload 2>/dev/null || true
     
-    # Enable and start the timer for all users? Or per-user?
-    # Per-user: each user enables their own timer
-    info "Note: Each user must enable their own timer:"
-    echo -e "       ${CYAN}systemctl --user enable --now sudome-daemon.timer${RESET}"
+    # Enable and start the daemon for the current user
+    info "Starting SudoMe daemon (monitors lock, sleep, shutdown, expiry)..."
+    
+    # Get the real user (not root) who ran sudo
+    REAL_USER="${SUDO_USER:-$USER}"
+    if [[ "$REAL_USER" != "root" ]]; then
+        # Enable the service to start on login
+        su - "$REAL_USER" -c "systemctl --user enable sudome-daemon.service" 2>/dev/null || true
+        
+        # Start it now
+        su - "$REAL_USER" -c "systemctl --user start sudome-daemon.service" 2>/dev/null || true
+        
+        ok "Daemon started for user '$REAL_USER'"
+        info "Each additional user should run:"
+    else
+        info "Each user should run:"
+    fi
+    echo -e "       ${CYAN}systemctl --user enable --now sudome-daemon.service${RESET}"
     
     info "Restarting polkit..."
     systemctl restart polkit 2>/dev/null || service polkit restart 2>/dev/null || true
@@ -264,13 +280,17 @@ do_install() {
     echo -e "${BOLD}${GREEN}╚══════════════════════════════════════════╝${RESET}"
     echo
     echo -e "  ${BOLD}Quick start:${RESET}"
-    echo -e "    ${CYAN}sudome on${RESET}          Grant 30 min sudo"
-    echo -e "    ${CYAN}sudome on 60${RESET}       Grant 60 min sudo"
-    echo -e "    ${CYAN}sudome status${RESET}     Check status"
-    echo -e "    ${CYAN}sudome off${RESET}        Revoke sudo"
+    echo -e "    ${CYAN}sudome on${RESET}                     Grant 30 min sudo"
+    echo -e "    ${CYAN}sudome on 60 -r \"Installing Docker\"${RESET}  Grant 60 min with reason"
+    echo -e "    ${CYAN}sudome status${RESET}                Check status"
+    echo -e "    ${CYAN}sudome off${RESET}                   Revoke sudo"
     echo
-    echo -e "  ${BOLD}Enable auto-revocation:${RESET}"
-    echo -e "    ${CYAN}systemctl --user enable --now sudome-daemon.timer${RESET}"
+    echo -e "  ${BOLD}Auto-revocation triggers:${RESET}"
+    echo -e "    ${CYAN}Screen lock${RESET}     → sudo revoked"
+    echo -e "    ${CYAN}System sleep${RESET}    → sudo revoked"
+    echo -e "    ${CYAN}Time/date change${RESET} → sudo revoked"
+    echo -e "    ${CYAN}Shutdown/restart${RESET} → sudo revoked"
+    echo -e "    ${CYAN}Timer expiry${RESET}     → sudo revoked"
     echo
     echo -e "  ${BOLD}Start the GUI:${RESET}"
     echo -e "    ${CYAN}sudome-gui${RESET}"

@@ -19,6 +19,21 @@ daemon_check_interval: 30
 # Automatically revoke sudo at user logout
 revoke_on_logout: true
 
+# Automatically revoke sudo when screen locks
+revoke_on_screen_lock: true
+
+# Automatically revoke sudo when system sleeps
+revoke_on_sleep: true
+
+# Automatically revoke sudo when time/date changes
+revoke_on_time_change: true
+
+# Automatically revoke sudo on shutdown/restart
+revoke_on_shutdown: true
+
+# Prompt user for reason when requesting sudo (enforced via CLI)
+require_reason: false
+
 # Show desktop notification before expiry (seconds before, 0 = disabled)
 notify_before_expiry: 300
 
