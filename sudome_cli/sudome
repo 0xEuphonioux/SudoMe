@@ -211,14 +211,15 @@ def cmd_status():
         print(f"  {red('✗')} {red(state)}")
 
 def cmd_on(minutes: int = 30, reason: str = ""):
-    """Request temporary sudo access."""
+    """Request temporary sudo access.
+    
+    Flow: sudome on -> pkexec auth dialog -> helper prompts for reason
+    (if required) -> grant. The helper runs AFTER authentication and
+    reads reason from /dev/tty which pkexec preserves.
+    """
     if minutes < 1:
         print(red("Minutes must be at least 1"))
         sys.exit(1)
-
-    # Collect reason BEFORE auth (reason first, then pkexec auth prompt)
-    if not reason:
-        reason = _prompt_reason()
 
     # Check if already active
     state, remaining, _ = get_status()
@@ -231,28 +232,34 @@ def cmd_on(minutes: int = 30, reason: str = ""):
     if reason:
         print(f"  Reason: {reason}")
     
-    # pkexec runs here — this triggers the Polkit auth dialog
-    ret, output = run_helper("grant", minutes, reason)
-
-    if ret == 0 and output.startswith("GRANTED"):
-        parts = output.split()
-        actual_minutes = int(parts[1]) if len(parts) > 1 else minutes
-        expiry_ts = int(parts[2]) if len(parts) > 2 else 0
-
-        print()
+    # Run pkexec WITHOUT capturing output — pkexec needs the terminal
+    # for the auth dialog AND the helper's interactive reason prompt.
+    import pwd
+    try:
+        username = os.getlogin()
+    except OSError:
+        username = pwd.getpwuid(os.getuid()).pw_name
+    
+    cmd = [PKEXEC, HELPER_PATH, "grant", username, str(minutes)]
+    if reason:
+        cmd.append(reason)
+    
+    ret = subprocess.run(cmd).returncode
+    
+    if ret != 0:
+        sys.exit(ret)
+    
+    # Show status after grant
+    print()
+    state, remaining, expiry = get_status()
+    if expiry > 0:
+        expiry_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(expiry))
         print(f"  {green('✓')} {bold('Sudo granted!')}")
-        print(f"    Duration:  {cyan(str(actual_minutes))} minutes")
-        if expiry_ts:
-            expiry_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(expiry_ts))
-            print(f"    Expires:   {expiry_str}")
+        print(f"    Duration:  {cyan(str(minutes))} minutes")
+        print(f"    Expires:   {expiry_str}")
         print()
         print(f"  You now have admin privileges. They will be")
         print(f"  automatically revoked when the timer expires.")
-    elif output == "ALREADY_ACTIVE":
-        print(yellow("Sudo is already active"))
-    else:
-        print(red(f"Failed to grant sudo: {output}"))
-        sys.exit(1)
 
 def cmd_off(reason: str = ""):
     """Revoke sudo immediately."""

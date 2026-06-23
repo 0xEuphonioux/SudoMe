@@ -85,6 +85,68 @@ validate_user() {
     fi
 }
 
+# ── Interactive reason prompt (runs AFTER pkexec auth, uses /dev/tty) ──
+prompt_reason_interactive() {
+    local presets min_len strict reason choice
+    presets=$(get_config "reason_presets" "")
+    min_len=$(get_config "reason_min_length" "0")
+    strict=$(get_config "reason_strict_presets" "false")
+    reason=""
+    
+    # Strip parentheses from get_config list format
+    presets="${presets#\(}"
+    presets="${presets%\)}"
+    
+    echo "" > /dev/tty
+    echo "  Reason required for administrator privileges:" > /dev/tty
+    
+    if [[ -n "$presets" ]]; then
+        echo "" > /dev/tty
+        local i=1
+        for preset in $presets; do
+            echo "    [$i] $preset" > /dev/tty
+            ((i++))
+        done
+        if [[ "$strict" != "true" ]]; then
+            echo "    [0] Enter custom reason" > /dev/tty
+        fi
+        echo "" > /dev/tty
+        read -p "  Select [1-$((i-1))]: " choice < /dev/tty
+        
+        if [[ "$choice" =~ ^[0-9]+$ ]]; then
+            local idx=1
+            for preset in $presets; do
+                if [[ "$choice" -eq "$idx" ]]; then
+                    reason="$preset"
+                    break
+                fi
+                ((idx++))
+            done
+        fi
+        
+        if [[ -z "$reason" ]] && [[ "$strict" == "true" ]]; then
+            echo "ERROR: Invalid selection" > /dev/tty
+            exit 1
+        fi
+    fi
+    
+    if [[ -z "$reason" ]]; then
+        read -p "  Enter reason: " reason < /dev/tty
+    fi
+    
+    if [[ -z "$reason" ]]; then
+        echo "ERROR: Reason cannot be empty" > /dev/tty
+        exit 1
+    fi
+    
+    if [[ "$min_len" -gt 0 ]] && [[ "${#reason}" -lt "$min_len" ]]; then
+        echo "ERROR: Reason must be at least $min_len characters (got ${#reason})" > /dev/tty
+        exit 1
+    fi
+    
+    echo "$reason"
+}
+
 # ── Reason validation ──────────────────────────────────────────────────
 validate_reason() {
     local reason="$1"
@@ -322,7 +384,15 @@ cmd_grant() {
         exit 1
     fi
     
-    # Validate reason
+    # Validate reason — if required and not provided, prompt interactively
+    # This runs AFTER pkexec authentication (pkexec preserves /dev/tty)
+    if [[ -z "$reason" ]]; then
+        local require_reason
+        require_reason=$(get_config "require_reason" "false")
+        if [[ "$require_reason" == "true" ]]; then
+            reason=$(prompt_reason_interactive)
+        fi
+    fi
     validate_reason "$reason"
     
     # Enforce max_duration from config
