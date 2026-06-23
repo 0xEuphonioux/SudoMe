@@ -60,7 +60,9 @@ class SudoMeTrayApp:
     """System tray application for SudoMe."""
 
     def __init__(self):
-        self.username = os.environ.get("USER", "")
+        # Use getpwuid for trusted username — never trust USER env var
+        import pwd
+        self.username = pwd.getpwuid(os.getuid()).pw_name
         self.default_minutes = 30
         self.expiry_ts = 0
         self.indicator = None
@@ -344,9 +346,9 @@ class SudoMeTrayApp:
         state, _, _ = self._get_status()
 
         if state == "ACTIVE":
-            # Extend
+            # Extend using renew (doesn't need group modification, extends expiry)
             self._notify("SudoMe", f"Extending sudo by {self.default_minutes} minutes...")
-            ret, output = self._run_helper("grant", self.default_minutes)
+            ret, output = self._run_helper("renew", self.default_minutes)
             if ret == 0:
                 self._notify("SudoMe", f"✓ Sudo extended by {self.default_minutes} minutes")
             else:

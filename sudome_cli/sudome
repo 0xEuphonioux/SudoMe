@@ -50,9 +50,12 @@ def cyan(s):  return f"{Colors.CYAN}{s}{Colors.RESET}"
 # ── Helpers ────────────────────────────────────────────────────────────
 def run_helper(action: str, minutes: int = 0, reason: str = "") -> tuple[int, str]:
     """Run the Polkit helper, returning (exit_code, output)."""
-    username = os.environ.get("SUDO_USER", os.environ.get("USER", ""))
-    if not username:
-        return 1, "ERROR: Cannot determine username"
+    # Use getlogin() or getpwuid for trusted username — never trust USER env var
+    import pwd
+    try:
+        username = os.getlogin()
+    except OSError:
+        username = pwd.getpwuid(os.getuid()).pw_name
 
     cmd = [PKEXEC, HELPER_PATH, action, username]
     if action == "grant" and minutes > 0:
@@ -196,7 +199,7 @@ def cmd_renew(minutes: int = 30, reason: str = ""):
         sys.exit(1)
 
     print(f"Extending sudo by {bold(str(minutes))} more minutes...")
-    ret, output = run_helper("grant", minutes, reason)
+    ret, output = run_helper("renew", minutes, reason)
 
     if ret == 0 and output.startswith("GRANTED"):
         parts = output.split()

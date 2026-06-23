@@ -39,6 +39,8 @@ except ImportError:
 
 STATE_DIR = "/var/lib/sudome"
 HELPER_PATH = "/usr/lib/sudome/sudome-helper"
+HELPER_REVOKE_PATH = "/usr/lib/sudome/sudome-helper-revoke"
+PKEXEC = "/usr/bin/pkexec"
 LOG_TAG = "sudome-daemon"
 CHECK_INTERVAL = 10  # seconds between expiry checks
 
@@ -52,10 +54,10 @@ def log(level: str, message: str):
 
 # ── Revocation ─────────────────────────────────────────────────────────
 def revoke_user(username: str, reason: str = "auto-revoked by daemon"):
-    """Revoke sudo for a specific user."""
+    """Revoke sudo for a specific user via pkexec (Polkit-authorized)."""
     try:
         result = subprocess.run(
-            [HELPER_PATH, "revoke", username, reason],
+            [PKEXEC, HELPER_REVOKE_PATH, "revoke", username, reason],
             capture_output=True, text=True, timeout=30
         )
         if "REVOKED" in result.stdout or "NOT_ACTIVE" in result.stdout:

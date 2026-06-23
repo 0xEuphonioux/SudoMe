@@ -30,6 +30,18 @@ log() {
 
 # ── Validate username ──────────────────────────────────────────────────
 validate_user() {
+    # Reject usernames with path separators or special characters
+    # that could enable path traversal or command injection
+    if [[ ! "$USERNAME" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+        log err "Invalid username characters: '$USERNAME'"
+        echo "ERROR: Invalid username '$USERNAME'. Only lowercase alphanumeric, dash, underscore allowed."
+        exit 1
+    fi
+    if [[ "${#USERNAME}" -gt 32 ]]; then
+        log err "Username too long: '$USERNAME'"
+        echo "ERROR: Username too long."
+        exit 1
+    fi
     if ! id "$USERNAME" &>/dev/null; then
         log err "User '$USERNAME' does not exist"
         echo "ERROR: User '$USERNAME' does not exist"
@@ -53,13 +65,15 @@ notify_user() {
     dbus_addr=$(cat "/run/user/${uid}/bus" 2>/dev/null || true)
     
     if [[ -n "$dbus_addr" ]] && command -v gdbus &>/dev/null; then
+        local urg_val=1
+        [[ "$urgency" == "critical" ]] && urg_val=2
         DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" \
         gdbus call --session \
             --dest org.freedesktop.Notifications \
             --object-path /org/freedesktop/Notifications \
             --method org.freedesktop.Notifications.Notify \
             "sudome" 0 "sudome" "$title" "$message" \
-            '[]' '{"urgency": <'"$([[ "$urgency" == "critical" ]] && echo 2 || echo 1)"'>}' \
+            '[]' "{'urgency': <$urg_val>}" \
             -1 2>/dev/null || true
     fi
 }
@@ -69,6 +83,31 @@ cmd_grant() {
     validate_user
     local minutes="${ARG3:-30}"
     local reason="${ARG4:-}"
+    
+    # Validate minutes is a positive integer (prevents shell/Python injection)
+    if ! [[ "$minutes" =~ ^[0-9]+$ ]] || [[ "$minutes" -lt 1 ]]; then
+        log err "Invalid minutes value: '$minutes'"
+        echo "ERROR: Invalid duration. Must be a positive integer."
+        exit 1
+    fi
+    
+    # Enforce max_duration from config
+    if [[ -f "/etc/sudome/config.yaml" ]] && command -v python3 &>/dev/null; then
+        local max_dur
+        max_dur=$(python3 -c "
+import yaml,sys
+try:
+    with open('/etc/sudome/config.yaml') as f:
+        c = yaml.safe_load(f)
+    print(c.get('max_duration', 0))
+except: print(0)
+" 2>/dev/null)
+        if [[ "$max_dur" -gt 0 ]] && [[ "$minutes" -gt "$max_dur" ]]; then
+            log err "Duration $minutes exceeds max_duration $max_dur"
+            echo "ERROR: Maximum allowed duration is $max_dur minutes"
+            exit 1
+        fi
+    fi
 
     # Check if already in sudo group
     if groups "$USERNAME" | grep -qw "$SUDO_GROUP"; then
@@ -79,9 +118,9 @@ cmd_grant() {
 
     # Add to sudo group
     if usermod -a -G "$SUDO_GROUP" "$USERNAME" 2>/dev/null; then
-        local expiry
-        expiry=$(date -d "+${minutes} minutes" +%s 2>/dev/null || \
-                 python3 -c "import time; print(int(time.time() + ${minutes}*60))")
+        local expiry now_ts
+        now_ts=$(date +%s 2>/dev/null || python3 -c "import time; print(int(time.time()))")
+        expiry=$((now_ts + minutes * 60))
 
         # Persist expiry timestamp
         mkdir -p "$STATE_DIR"
@@ -106,11 +145,11 @@ cmd_grant() {
         # Desktop notification
         local notify_msg="You now have administrator privileges for ${minutes} minutes."
         if [[ -n "$reason" ]]; then
-            notify_msg="$notify_msg Reason: $reason"
+            notify_msg="${notify_msg} Reason: ${reason}"
         fi
         notify_user "$USERNAME" \
             "🔓 Administrator Privileges Granted" \
-            "With great power comes great responsibility. ${notify_msg}" \
+            "${notify_msg}" \
             "normal"
 
         echo "GRANTED $minutes $expiry"
@@ -151,11 +190,11 @@ cmd_revoke() {
         # Desktop notification
         local notify_msg="Your elevation has expired. You have been demoted back to a standard user."
         if [[ -n "$reason" ]]; then
-            notify_msg="$notify_msg ($reason)"
+            notify_msg="${notify_msg} (${reason})"
         fi
         notify_user "$USERNAME" \
             "🔒 Administrator Privileges Revoked" \
-            "$notify_msg" \
+            "${notify_msg}" \
             "normal"
 
         echo "REVOKED"
@@ -186,10 +225,60 @@ cmd_status() {
     fi
 }
 
+# ── Renew sudo (extend existing grant) ─────────────────────────────────
+cmd_renew() {
+    validate_user
+    local minutes="${ARG3:-30}"
+    local reason="${ARG4:-}"
+    
+    # Validate minutes
+    if ! [[ "$minutes" =~ ^[0-9]+$ ]] || [[ "$minutes" -lt 1 ]]; then
+        log err "Invalid minutes value: '$minutes'"
+        echo "ERROR: Invalid duration. Must be a positive integer."
+        exit 1
+    fi
+
+    # Check if currently active
+    if ! groups "$USERNAME" | grep -qw "$SUDO_GROUP"; then
+        echo "NOT_ACTIVE"
+        log info "User '$USERNAME' not in sudo group — cannot renew"
+        exit 0
+    fi
+
+    # Extend expiry by adding minutes to current expiry (or now if file missing)
+    mkdir -p "$STATE_DIR"
+    local now_ts new_expiry
+    now_ts=$(date +%s 2>/dev/null || python3 -c "import time; print(int(time.time()))")
+    
+    if [[ -f "${STATE_DIR}/${USERNAME}.expiry" ]]; then
+        local current_expiry
+        current_expiry=$(cat "${STATE_DIR}/${USERNAME}.expiry")
+        if [[ "$current_expiry" -lt "$now_ts" ]]; then
+            new_expiry=$((now_ts + minutes * 60))
+        else
+            new_expiry=$((current_expiry + minutes * 60))
+        fi
+    else
+        new_expiry=$((now_ts + minutes * 60))
+    fi
+    
+    echo "$new_expiry" > "${STATE_DIR}/${USERNAME}.expiry"
+    chmod 644 "${STATE_DIR}/${USERNAME}.expiry"
+    
+    local log_msg="RENEW: user='$USERNAME' minutes=$minutes expiry=$new_expiry"
+    if [[ -n "$reason" ]]; then
+        log_msg="$log_msg reason='$reason'"
+    fi
+    log notice "$log_msg"
+    
+    echo "GRANTED $minutes $new_expiry"
+}
+
 # ── Main ───────────────────────────────────────────────────────────────
 case "$ACTION" in
     grant)  cmd_grant ;;
     revoke) cmd_revoke ;;
+    renew)  cmd_renew ;;
     status) cmd_status ;;
     *)
         echo "ERROR: Unknown action '$ACTION'. Use: grant|revoke|status <username> [minutes] [reason]"
