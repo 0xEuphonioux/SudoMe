@@ -80,6 +80,7 @@ class SudoMeTrayApp:
         )
         self.indicator.set_status(IndicatorModule.IndicatorStatus.ACTIVE)
         self.indicator.set_attention_icon_full("sudome-expiring", "Sudo expiring soon")
+        self.indicator.set_label("", "")
 
         # Build menu
         self._build_menu()
@@ -136,9 +137,9 @@ class SudoMeTrayApp:
         about_item.connect("activate", self._on_about)
         self.menu.append(about_item)
 
-        # Quit
+        # Quit (restarts to prevent accidental exit)
         quit_item = Gtk.MenuItem(label="Quit")
-        quit_item.connect("activate", lambda _: Gtk.main_quit())
+        quit_item.connect("activate", self._on_quit)
         self.menu.append(quit_item)
 
         self.indicator.set_menu(self.menu)
@@ -222,8 +223,10 @@ class SudoMeTrayApp:
             else:
                 self.indicator.set_icon_full("sudome-active", "SudoMe — Active")
             
+            self.indicator.set_label(remaining_str, remaining_str)
             self.indicator.set_title(f"SudoMe: {remaining_str}")
             self.expiry_ts = expiry
+            self.menu.show_all()
 
             # Start live countdown if not already running
             self._start_countdown()
@@ -238,8 +241,10 @@ class SudoMeTrayApp:
             self.revoke_item.set_sensitive(False)
 
             self.indicator.set_icon_full("sudome-inactive", "SudoMe — Not Active")
+            self.indicator.set_label("", "")
             self.indicator.set_title("SudoMe: Off")
             self.expiry_ts = 0
+            self.menu.show_all()
 
             # Stop countdown
             self._stop_countdown()
@@ -271,19 +276,23 @@ class SudoMeTrayApp:
 
         if remaining <= 0:
             self.time_item.set_label("  Expired")
+            self.indicator.set_label("Expired", "Expired")
             self.indicator.set_title("SudoMe: Expired")
             self._stop_countdown()
+            self.menu.show_all()
             # Next periodic refresh will switch to NOT_ACTIVE
             return False
 
         remaining_str = self._format_time(remaining)
         self.time_item.set_label(f"  Remaining: {remaining_str}")
+        self.indicator.set_label(remaining_str, remaining_str)
         self.indicator.set_title(f"SudoMe: {remaining_str}")
 
         # Switch icon to expiring when < 5 min
         if remaining <= 300 and remaining > 0:
             self.indicator.set_icon_full("sudome-expiring", "Sudo expiring soon")
 
+        self.menu.show_all()
         return True  # Keep timer running
 
     def _format_time(self, seconds: int) -> str:
@@ -346,6 +355,13 @@ class SudoMeTrayApp:
         # Force immediate refresh
         state, remaining, expiry = self._get_status()
         self._update_ui(state, remaining, expiry)
+
+    def _on_quit(self, _widget):
+        """Restart the app instead of quitting (prevents accidental exit)."""
+        self._stop_countdown()
+        Gtk.main_quit()
+        # exec into a fresh instance
+        os.execv(sys.executable, [sys.executable] + sys.argv)
 
     def _on_about(self, _widget):
         """Show About dialog."""

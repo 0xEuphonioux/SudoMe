@@ -204,7 +204,7 @@ do_install() {
     echo -e ""
 
     # ── Confirmation ──────────────────────────────────────────────────
-    echo -ne "  ${BOLD}Continue with install?${RESET} [${BOLD}Y${RESET}/n] "
+    echo -ne "  ${BOLD}Continue with install?${RESET} [${BOLD}Y${RESET}/${BOLD}N${RESET}] "
     read -r CONFIRM
     if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
         echo -e "\n  [!] Install cancelled."
