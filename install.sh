@@ -153,16 +153,38 @@ install_deps() {
 do_install() {
     require_root
     
-    echo -e "${BOLD}${GREEN}"
-    echo "╔══════════════════════════════════════════╗"
-    echo "║       SudoMe v1.0.0 — Installer         ║"
-    echo "║  Temporary sudo privilege elevation     ║"
-    echo "╚══════════════════════════════════════════╝"
+    # ── Banner ────────────────────────────────────────────────────────
     echo -e "${RESET}"
+    echo -e "${BOLD}${GREEN}    ╔══════════════════════════════════════════════════════════╗${RESET}"
+    echo -e "${BOLD}${GREEN}    ║${RESET}  ${BOLD}${CYAN}   ███████╗██╗   ██╗██████╗  ██████╗ ███╗   ███╗███████╗${BOLD}${GREEN}  ║${RESET}"
+    echo -e "${BOLD}${GREEN}    ║${RESET}  ${BOLD}${CYAN}   ██╔════╝██║   ██║██╔══██╗██╔═══██╗████╗ ████║██╔════╝${BOLD}${GREEN}  ║${RESET}"
+    echo -e "${BOLD}${GREEN}    ║${RESET}  ${BOLD}${CYAN}   ███████╗██║   ██║██║  ██║██║   ██║██╔████╔██║█████╗  ${BOLD}${GREEN}  ║${RESET}"
+    echo -e "${BOLD}${GREEN}    ║${RESET}  ${BOLD}${CYAN}   ╚════██║██║   ██║██║  ██║██║   ██║██║╚██╔╝██║██╔══╝  ${BOLD}${GREEN}  ║${RESET}"
+    echo -e "${BOLD}${GREEN}    ║${RESET}  ${BOLD}${CYAN}   ███████║╚██████╔╝██████╔╝╚██████╔╝██║ ╚═╝ ██║███████╗${BOLD}${GREEN}  ║${RESET}"
+    echo -e "${BOLD}${GREEN}    ║${RESET}  ${BOLD}${CYAN}   ╚══════╝ ╚═════╝ ╚═════╝  ╚═════╝ ╚═╝     ╚═╝╚══════╝${BOLD}${GREEN}  ║${RESET}"
+    echo -e "${BOLD}${GREEN}    ║${RESET}                                                      ${BOLD}${GREEN}║${RESET}"
+    echo -e "${BOLD}${GREEN}    ║${RESET}  ${BOLD}${RED}v2.0.0${RESET}  │  Temporary sudo privilege elevation       ${BOLD}${GREEN}║${RESET}"
+    echo -e "${BOLD}${GREEN}    ║${RESET}  ${CYAN}github.com/0xEuphonioux/SudoMe${RESET}                   ${BOLD}${GREEN}║${RESET}"
+    echo -e "${BOLD}${GREEN}    ╚══════════════════════════════════════════════════════════╝${RESET}"
+    echo -e ""
+    echo -e "  ${RED}▲${RESET} ${BOLD}${YELLOW}WARNING:${RESET} This script will install system-wide components."
+    echo -e "  ${RED}▲${RESET} It requires ${BOLD}root${RESET} and will modify system configuration."
+    echo -e ""
 
     install_deps
 
-    header "Installing SudoMe"
+    echo -e ""
+    echo -e "  ${CYAN}[*]${RESET} ${BOLD}Initializing installation sequence...${RESET}"
+    sleep 0.3
+    echo -e "  ${GREEN}[+]${RESET} Target distro: ${BOLD}$(detect_distro)${RESET}"
+    sleep 0.2
+    echo -e "  ${GREEN}[+]${RESET} Install prefix: ${BOLD}${INSTALL_PREFIX}${RESET}"
+    sleep 0.2
+    echo -e "  ${GREEN}[+]${RESET} Dependencies resolved"
+    sleep 0.2
+    echo -e ""
+
+    header "Deploying payload"
 
     RSYSLOG_DIR="/etc/rsyslog.d"
     
@@ -290,25 +312,36 @@ do_install() {
 
     # ── Done ──
     echo
-    echo -e "${BOLD}${GREEN}╔══════════════════════════════════════════╗${RESET}"
-    echo -e "${BOLD}${GREEN}║         SudoMe installed! 🎉             ║${RESET}"
-    echo -e "${BOLD}${GREEN}╚══════════════════════════════════════════╝${RESET}"
+    echo -e "  ${GREEN}[✓]${RESET} Polkit policy registered"
+    echo -e "  ${GREEN}[✓]${RESET} D-Bus configuration loaded"
+    echo -e "  ${GREEN}[✓]${RESET} systemd daemon deployed"
+    echo -e ""
+    echo -e "${BOLD}${GREEN}    ╔══════════════════════════════════════════════════════════╗${RESET}"
+    echo -e "${BOLD}${GREEN}    ║${RESET}                                                      ${BOLD}${GREEN}║${RESET}"
+    echo -e "${BOLD}${GREEN}    ║${RESET}         ${BOLD}SudoMe v2.0.0 installed successfully${RESET}          ${BOLD}${GREEN}║${RESET}"
+    echo -e "${BOLD}${GREEN}    ║${RESET}                                                      ${BOLD}${GREEN}║${RESET}"
+    echo -e "${BOLD}${GREEN}    ╚══════════════════════════════════════════════════════════╝${RESET}"
     echo
-    echo -e "  ${BOLD}Quick start:${RESET}"
-    echo -e "    ${CYAN}sudome on${RESET}                     Grant 30 min sudo"
-    echo -e "    ${CYAN}sudome on 60 -r \"Installing Docker\"${RESET}  Grant 60 min with reason"
-    echo -e "    ${CYAN}sudome status${RESET}                Check status"
-    echo -e "    ${CYAN}sudome off${RESET}                   Revoke sudo"
+    echo -e "  ${BOLD}${CYAN}COMMANDS${RESET}"
+    echo -e "  ─────────────────────────────────────────────"
+    echo -e "  ${BOLD}sudome on${RESET}                     Grant 30 min sudo"
+    echo -e "  ${BOLD}sudome on 60 -r \"Installing Docker\"${RESET}  Grant 60 min + reason"
+    echo -e "  ${BOLD}sudome status${RESET}                Check current status"
+    echo -e "  ${BOLD}sudome off${RESET}                   Revoke immediately"
+    echo -e "  ${BOLD}sudome renew${RESET}                 Extend current grant"
     echo
-    echo -e "  ${BOLD}Auto-revocation triggers:${RESET}"
-    echo -e "    ${CYAN}Screen lock${RESET}     → sudo revoked"
-    echo -e "    ${CYAN}System sleep${RESET}    → sudo revoked"
-    echo -e "    ${CYAN}Time/date change${RESET} → sudo revoked"
-    echo -e "    ${CYAN}Shutdown/restart${RESET} → sudo revoked"
-    echo -e "    ${CYAN}Timer expiry${RESET}     → sudo revoked"
+    echo -e "  ${BOLD}${RED}AUTO-REVOCATION TRIGGERS${RESET}"
+    echo -e "  ─────────────────────────────────────────────"
+    echo -e "    ${CYAN}Screen lock${RESET}         → sudo revoked"
+    echo -e "    ${CYAN}System sleep${RESET}        → sudo revoked"
+    echo -e "    ${CYAN}Time/date change${RESET}     → sudo revoked"
+    echo -e "    ${CYAN}Shutdown/restart${RESET}     → sudo revoked (all users)"
+    echo -e "    ${CYAN}Timer expiry${RESET}         → sudo revoked"
     echo
-    echo -e "  ${BOLD}Start the GUI:${RESET}"
-    echo -e "    ${CYAN}sudome-gui${RESET}"
+    echo -e "  ${BOLD}${GREEN}GUI${RESET}"
+    echo -e "  ─────────────────────────────────────────────"
+    echo -e "  ${BOLD}sudome-gui${RESET}                  Launch system tray app"
+    echo -e "  ${CYAN}Auto-starts on login${RESET}        via /etc/xdg/autostart/"
     echo
 }
 
