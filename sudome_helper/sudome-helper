@@ -395,8 +395,6 @@ cmd_revoke() {
     validate_user
     local reason="${ARG3:-}"
     
-    validate_reason "$reason"
-
     # Check if in sudo group
     if ! groups "$USERNAME" | grep -qw "$SUDO_GROUP"; then
         echo "NOT_ACTIVE"
