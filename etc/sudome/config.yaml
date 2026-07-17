@@ -1,10 +1,10 @@
-# SudoMe Configuration v2.2.0
+# SudoMe Configuration 0.1.0-beta
 # /etc/sudome/config.yaml
 #
 # Enterprise configuration for SudoMe — temporary sudo privilege
 # elevation with automatic revocation, audit logging, and SIEM integration.
 #
-# NEW in v2.2 (from SAP Privileges + MakeMeAdmin cross-pollination):
+# NEW in 0.1.0-beta (from SAP Privileges + MakeMeAdmin cross-pollination):
 #   - Denied entities + per-trigger exclusions
 #   - Enforced policy settings (override preferences)
 #   - Per-user / per-group timeout overrides

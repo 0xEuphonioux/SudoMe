@@ -499,7 +499,7 @@ payload = {
     'timestamp': '$now_iso',
     'hostname': '$hostname',
     'source': 'sudome',
-    'version': '2.0.0'
+    'version': '0.1.0-beta'
 }
 if '$reason' != '':
     payload['reason'] = '$reason'
@@ -511,7 +511,7 @@ print(json.dumps(payload))
     if [[ -n "$payload" ]]; then
         curl -s -X POST "$webhook_url" \
             -H "Content-Type: application/json" \
-            -H "User-Agent: SudoMe/2.0.0" \
+            -H "User-Agent: SudoMe/0.1.0-beta" \
             -d "$payload" \
             --max-time "$timeout" \
             > /dev/null 2>&1 &

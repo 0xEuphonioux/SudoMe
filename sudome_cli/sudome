@@ -26,7 +26,7 @@ import sys
 import time
 from pathlib import Path
 
-VERSION = "2.0.0"
+VERSION = "0.1.0-beta"
 HELPER_PATH = "/usr/lib/sudome/sudome-helper"
 HELPER_REVOKE_PATH = "/usr/lib/sudome/sudome-helper-revoke"
 STATE_DIR = "/var/lib/sudome"

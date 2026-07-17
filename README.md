@@ -4,7 +4,10 @@
 
 # SudoMe
 
-### Transparent, free, and secure admin rights management for Linux.
+### Transparent, free, and secure admin rights management for Linux — **Public Beta**
+
+> [!WARNING]
+> **SudoMe is in active beta development (0.1.0-beta).** Features may change, APIs may shift, and bugs are expected. Do not deploy to production without thorough testing. Use at your own risk — we welcome bug reports, feedback, and contributions while we work toward a stable release.
 
 _SudoMe_ gives users temporary `sudo` privileges when needed without granting permanent admin rights. Built for enterprise environments with automatic revocation, audit logging, webhook/SIEM integration, and Polkit-backed security. One click to elevate, automatic rollback when you're done.
 
@@ -270,23 +273,24 @@ Copyright (c) 2026 0xEuphonioux and SudoMe contributors. Apache License 2.0.
 
 ## Changelog
 
-### v2.3 — Elevated Process Logging
-- **New:** `log_elevated_processes` config option — audits every command run under an active sudo grant via `journalctl -t sudome-elevated`
-- **Fix:** SEC-01 — helper argument injection hardening (+224 lines)
-- **Fix:** Daemon race condition on expiry check (+312 lines refactor)
-- **Docs:** Added SAP vs MakeMeAdmin vs SudoMe comparison matrix (`COMPARISON_REPORT.md`)
-- **Docs:** Full security audit report (`SECURITY_AUDIT.md`) — Grade B+ (88/100)
+### 0.1.0-beta — Public Beta
+- 🔐 **Polkit-backed grant/revoke** — `auth_self` for grant, `yes` for revoke (instant, no prompt)
+- ⏱️ **Multi-trigger auto-revoke** — Timer expiry, screen lock, sleep, time change, shutdown
+- 🛡️ **Excluded users** — Service accounts immune to auto-revoke via `auto_revoke_excluded_users`
+- 📋 **Reason enforcement** — Required/optional with configurable presets, min/max length, strict mode
+- 🔄 **Post-change actions** — Executables with SHA-256 checksum verification after grant/revoke
+- 🌐 **SIEM webhooks** — HTTP POST on grant/revoke/renew with custom JSON payload
+- 🔔 **Renewal notifications** — Proactive desktop notification 60s before expiry
+- 🖥️ **GTK3 system tray** — GNOME/KDE/XFCE AppIndicator with live countdown timer
+- ⌨️ **CLI** — `sudome on/off/status/renew` with colored output and expiry countdown
+- 📊 **Audit logging** — Structured syslog events, SAP Privileges-compatible format
+- 📝 **Elevated process logging** — `log_elevated_processes` audits every command under active grants
+- 🔒 **systemd sandboxing** — NoNewPrivileges, ProtectSystem=strict, PrivateTmp, zero capabilities
+- 🛡️ **D-Bus lockdown** — Only `at_console` users can communicate; default-deny policy
+- 🌍 **Cross-distro** — Ubuntu, Debian, Fedora, RHEL, Arch, openSUSE via single install script
+- 🐛 **Fix** — SEC-01 helper argument injection hardening (+224 lines)
+- 🐛 **Fix** — Daemon race condition on expiry check (+312 lines refactor)
+- 🐛 **Fix** — Policy override loading in daemon (was only reading config, not policy)
+- 📄 **Documentation** — Full security audit (B+ 88/100), SAP vs MakeMeAdmin comparison matrix
 
-### v2.2 — Webhooks & Post-Change Actions
-- Webhook HTTP POST to SIEM on grant/revoke/renew with custom JSON payload
-- Post-change executable with SHA-256 checksum verification
-- Reason enforcement with presets, strict mode, min/max length
-
-### v2.1 — Cross-Distro Support
-- Fedora 39+, RHEL 9+, Arch, openSUSE support
-- Auto-detection of package manager and dependencies in install script
-
-### v2.0 — Initial Release
-- Polkit-backed grant/revoke with system tray + CLI
-- Timer, screen lock, sleep, time change, shutdown auto-revoke
-- systemd sandboxing, D-Bus lockdown, structured syslog audit
+> **This is pre-release software.** APIs and config formats may change before 1.0. Report issues on [GitHub](https://github.com/0xEuphonioux/SudoMe/issues).

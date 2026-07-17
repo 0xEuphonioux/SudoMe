@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SudoMe Daemon v2.3 — Long-running listener for auto-revocation and
+SudoMe Daemon 0.1.0-beta — Long-running listener for auto-revocation and
 elevated process logging (from MakeMeAdmin feature set).
 
 Monitored events:
@@ -463,7 +463,7 @@ def setup_dbus_listeners(loop):
 
 # ── Main ───────────────────────────────────────────────────────────────
 def main():
-    log("info", "SudoMe daemon v2.3 starting")
+    log("info", "SudoMe daemon 0.1.0-beta starting")
     excluded = get_excluded_users()
     if excluded:
         log("info", f"Auto-revoke excluded users: {', '.join(excluded)}")

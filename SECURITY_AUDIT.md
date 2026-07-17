@@ -1,5 +1,5 @@
 # SudoMe Security Audit Report
-## v2.3 — Full Code Review | 2026-07-17
+## 0.1.0-beta — Full Code Review | 2026-07-17
 
 ### Scope
 
@@ -54,13 +54,13 @@ If an attacker can control `$_POLICY_FILE` or `$_CONFIG_FILE` values, they can i
 
 | Field | Value |
 |-------|-------|
-| **File** | `sudome-daemon (original v2.0)` |
+| **File** | `sudome-daemon (original beta)` |
 | **CVSS** | **5.0** (AV:L/AC:L/PR:L/UI:N/S:U/C:N/I:H/A:N) |
-| **Status** | ✅ Fixed in v2.3 |
+| **Status** | ✅ Fixed in 0.1.0-beta |
 
 **Finding:** The daemon's `load_config()` only read `config.yaml`, not `policy.yaml`. This meant enforced policy settings had no effect on the daemon — it would use preference values even when a policy explicitly overrode them.
 
-**Fix:** v2.3 now loads and merges `policy.yaml` with the same override semantics as the helper.
+**Fix:** 0.1.0-beta now loads and merges `policy.yaml` with the same override semantics as the helper.
 
 ---
 
@@ -92,9 +92,9 @@ If `webhook_custom_data` in config.yaml contains `'''`, it breaks out of the Pyt
 | Field | Value |
 |-------|-------|
 | **File** | `sudome-daemon` |
-| **Status** | ✅ Fixed in v2.3 |
+| **Status** | ✅ Fixed in 0.1.0-beta |
 
-**Finding:** The per-trigger exclusion feature (`auto_revoke_exclusions`) was documented in config.yaml but never read by the daemon. v2.3 now reads and enforces it.
+**Finding:** The per-trigger exclusion feature (`auto_revoke_exclusions`) was documented in config.yaml but never read by the daemon. 0.1.0-beta now reads and enforces it.
 
 ---
 
@@ -127,7 +127,7 @@ If `webhook_custom_data` in config.yaml contains `'''`, it breaks out of the Pyt
 
 ---
 
-## New Feature: Elevated Process Logging (v2.3)
+## New Feature: Elevated Process Logging (0.1.0-beta)
 
 Added in this audit — mirrors MakeMeAdmin's most unique feature:
 

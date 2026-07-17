@@ -1,4 +1,4 @@
-# SudoMe v2.2 — Cross-Pollination Report
+# SudoMe 0.1.0-beta — Cross-Pollination Report
 ## Best Features from SAP Privileges + MakeMeAdmin → SudoMe
 
 ### Source Analysis
@@ -11,7 +11,7 @@
 
 ---
 
-## Features Implemented in v2.2
+## Features Implemented in 0.1.0-beta
 
 ### 1. Denied Entities + Allowed Entities (from SAP Privileges)
 **Status: ✅ Implemented**
@@ -98,7 +98,7 @@ allowed_parent_processes:
 
 ## Feature Comparison Matrix
 
-| Feature | SAP Privileges | MakeMeAdmin | SudoMe v2.0 | SudoMe v2.2 |
+| Feature | SAP Privileges | MakeMeAdmin | SudoMe (beta) | SudoMe 0.1.0-beta |
 |---------|:---:|:---:|:---:|:---:|
 | **Temporary admin elevation** | ✅ | ✅ | ✅ | ✅ |
 | **Auto-revoke on timer** | ✅ | ✅ | ✅ | ✅ |

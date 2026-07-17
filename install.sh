@@ -196,7 +196,8 @@ do_install() {
     echo -e "${BOLD}    ║${RESET}     ███████║╚██████╔╝██████╔╝╚██████╔╝██║ ╚═╝ ██║███████╗  ${BOLD}║${RESET}"
     echo -e "${BOLD}    ║${RESET}     ╚══════╝ ╚═════╝ ╚═════╝  ╚═════╝ ╚═╝     ╚═╝╚══════╝  ${BOLD}║${RESET}"
     echo -e "${BOLD}    ║${RESET}                                                        ${BOLD}║${RESET}"
-    echo -e "${BOLD}    ║${RESET}     v2.0.0  │  Temporary sudo privilege elevation       ${BOLD}║${RESET}"
+    echo -e "${BOLD}    ║${RESET}     0.1.0-beta  │  Temporary sudo privilege elevation       ${BOLD}║${RESET}"
+    echo -e "${BOLD}    ║${RESET}     (beta)   │                                            ${BOLD}║${RESET}"
     echo -e "${BOLD}    ║${RESET}     github.com/0xEuphonioux/SudoMe                    ${BOLD}║${RESET}"
     echo -e "${BOLD}    ╚══════════════════════════════════════════════════════════╝${RESET}"
     echo -e ""
@@ -385,7 +386,7 @@ do_install() {
     echo -e ""
     echo -e "${BOLD}    ╔══════════════════════════════════════════════════════════╗${RESET}"
     echo -e "${BOLD}    ║${RESET}                                                      ${BOLD}║${RESET}"
-    echo -e "${BOLD}    ║${RESET}           SudoMe v2.0.0 installed successfully            ${BOLD}║${RESET}"
+    echo -e "${BOLD}    ║${RESET}        SudoMe 0.1.0-beta installed successfully             ${BOLD}║${RESET}"
     echo -e "${BOLD}    ║${RESET}                                                      ${BOLD}║${RESET}"
     echo -e "${BOLD}    ╚══════════════════════════════════════════════════════════╝${RESET}"
     echo
@@ -460,7 +461,7 @@ case "${1:-}" in
         do_uninstall
         ;;
     --help|-h)
-        echo "SudoMe v2.0.0 — Temporary sudo privilege elevation for Linux"
+        echo "SudoMe 0.1.0-beta — Temporary sudo privilege elevation for Linux (beta)"
         echo ""
         echo "Usage: sudo ./install.sh [OPTION]"
         echo ""
