@@ -38,6 +38,7 @@ That's it. The installer auto-detects your distro, installs dependencies, and st
 | 🖥️ **System tray** | GNOME/KDE/XFCE native AppIndicator with live countdown timer |
 | ⌨️ **CLI** | `sudome on/off/status/renew` with colored output and expiry countdown |
 | 📊 **Audit logging** | Structured syslog events, journalctl integration, SAP Privileges-compatible format |
+| 📝 **Process logging** | `log_elevated_processes` audits every command run under active grants via syslog |
 | ⚙️ **Enterprise config** | Everything controlled via `/etc/sudome/config.yaml` — deploy with Ansible, Puppet, Chef |
 | 🔒 **Hardened daemon** | systemd sandboxing: no new privileges, protect system, private /tmp, zero capabilities |
 | 🌍 **Cross-distro** | Single install script, auto-detects package manager and dependencies |
@@ -168,6 +169,9 @@ webhook_timeout: 10
 notify_before_expiry: 300      # Warn 5 min before expiry
 renewal_notification_interval: 60   # Renew prompt 60s before
 allow_privilege_renewal: true
+
+# ── Audit ──
+log_elevated_processes: true   # Log every command run under active grants
 ```
 
 Deploy via Ansible:
@@ -190,6 +194,9 @@ journalctl -t sudome-helper
 
 # View daemon events (auto-revoke, renewal notifications)
 journalctl -t sudome-daemon
+
+# View elevated process log (commands run under active grants)
+journalctl -t sudome-elevated
 
 # Follow in real-time
 journalctl -t sudome-helper -f
@@ -260,3 +267,26 @@ sudo ./install.sh --uninstall
 ## License
 
 Copyright (c) 2026 0xEuphonioux and SudoMe contributors. Apache License 2.0.
+
+## Changelog
+
+### v2.3 — Elevated Process Logging
+- **New:** `log_elevated_processes` config option — audits every command run under an active sudo grant via `journalctl -t sudome-elevated`
+- **Fix:** SEC-01 — helper argument injection hardening (+224 lines)
+- **Fix:** Daemon race condition on expiry check (+312 lines refactor)
+- **Docs:** Added SAP vs MakeMeAdmin vs SudoMe comparison matrix (`COMPARISON_REPORT.md`)
+- **Docs:** Full security audit report (`SECURITY_AUDIT.md`) — Grade B+ (88/100)
+
+### v2.2 — Webhooks & Post-Change Actions
+- Webhook HTTP POST to SIEM on grant/revoke/renew with custom JSON payload
+- Post-change executable with SHA-256 checksum verification
+- Reason enforcement with presets, strict mode, min/max length
+
+### v2.1 — Cross-Distro Support
+- Fedora 39+, RHEL 9+, Arch, openSUSE support
+- Auto-detection of package manager and dependencies in install script
+
+### v2.0 — Initial Release
+- Polkit-backed grant/revoke with system tray + CLI
+- Timer, screen lock, sleep, time change, shutdown auto-revoke
+- systemd sandboxing, D-Bus lockdown, structured syslog audit

@@ -36,26 +36,61 @@ log() {
     logger -t "$LOG_TAG" -p "auth.$level" "$*"
 }
 
-# ── Config reader (cached to avoid repeated python calls) ──────────────
+# ── Config reader (cached, supports policy override from SAP Privileges) ─
+_CONFIG_FILE="/etc/sudome/config.yaml"
+_POLICY_FILE="/etc/sudome/policy.yaml"
 _config_cache=""
+
+# Load merged config: policy.yaml overrides config.yaml
+# Uses argument passing instead of string interpolation (SAFE against injection)
+load_config() {
+    _config_cache=""
+    if [[ ! -f "$_CONFIG_FILE" ]]; then
+        return
+    fi
+    if command -v python3 &>/dev/null; then
+        _config_cache=$(python3 - "$_CONFIG_FILE" "$_POLICY_FILE" << 'PYEOF'
+import sys, yaml
+
+def load_yaml(path):
+    try:
+        with open(path) as f:
+            return yaml.safe_load(f) or {}
+    except Exception:
+        return {}
+
+config = load_yaml(sys.argv[1])
+
+# Merge policy.yaml if it exists and was passed
+if len(sys.argv) > 2 and sys.argv[2]:
+    policy = load_yaml(sys.argv[2])
+    config.update(policy)
+
+for k, v in config.items():
+    if isinstance(v, bool):
+        print(f'{k}={str(v).lower()}')
+    elif isinstance(v, list):
+        vals = ' '.join(str(x) for x in v)
+        print(f'{k}=({vals})')
+    elif isinstance(v, dict):
+        for dk, dv in v.items():
+            if isinstance(dv, list):
+                dvals = ' '.join(str(x) for x in dv)
+                print(f'{k}.{dk}=({dvals})')
+            elif dv is not None:
+                print(f'{k}.{dk}={dv}')
+    elif v is not None:
+        print(f'{k}={v}')
+PYEOF
+    )
+fi
+}
+
 get_config() {
     local key="$1"
     local default="${2:-}"
-    if [[ -z "$_config_cache" ]] && [[ -f "$CONFIG_FILE" ]] && command -v python3 &>/dev/null; then
-        _config_cache=$(python3 -c "
-import yaml
-try:
-    with open('$CONFIG_FILE') as f:
-        c = yaml.safe_load(f) or {}
-    for k, v in c.items():
-        if isinstance(v, bool):
-            print(f'{k}={str(v).lower()}')
-        elif isinstance(v, list):
-            print(f'{k}=({(' '.join(str(x) for x in v))})')
-        elif v is not None:
-            print(f'{k}={v}')
-except: pass
-" 2>/dev/null)
+    if [[ -z "$_config_cache" ]]; then
+        load_config
     fi
     local val
     val=$(echo "$_config_cache" | grep "^${key}=" | head -1 | cut -d= -f2-)
@@ -64,6 +99,141 @@ except: pass
     else
         echo "$val"
     fi
+}
+
+# ── Entity Authorization (SAP Privileges feature) ──────────────────────
+# Check if user is in allowed list and not in denied list
+check_allowed_denied() {
+    local username="$1"
+    
+    # Get denied entities
+    local denied
+    denied=$(get_config "denied_entities" "")
+    denied="${denied#\(}"; denied="${denied%\)}"
+    
+    # Check denied first (trumps allowed)
+    for entity in $denied; do
+        if [[ "$entity" == "$username" ]]; then
+            log err "User '$username' is in denied_entities — access denied"
+            echo "ERROR: You are not authorized to request sudo privileges."
+            exit 1
+        fi
+        if [[ "$entity" =~ ^@ ]]; then
+            local group="${entity#@}"
+            if groups "$username" 2>/dev/null | grep -qw "$group"; then
+                log err "User '$username' is in denied group '$group' — access denied"
+                echo "ERROR: Your group is not authorized to request sudo privileges."
+                exit 1
+            fi
+        fi
+    done
+    
+    # Get allowed entities (if set, must be in list)
+    local allowed
+    allowed=$(get_config "allowed_entities" "")
+    allowed="${allowed#\(}"; allowed="${allowed%\)}"
+    
+    if [[ -z "$allowed" ]]; then
+        return 0  # No allow list — everyone allowed (after deny check)
+    fi
+    
+    for entity in $allowed; do
+        if [[ "$entity" == "$username" ]]; then
+            return 0
+        fi
+        if [[ "$entity" =~ ^@ ]]; then
+            local group="${entity#@}"
+            if groups "$username" 2>/dev/null | grep -qw "$group"; then
+                return 0
+            fi
+        fi
+    done
+    
+    log err "User '$username' not in allowed_entities — access denied"
+    echo "ERROR: You are not authorized to request sudo privileges."
+    echo "Contact your system administrator for access."
+    exit 1
+}
+
+# ── Per-User Timeout Override (MakeMeAdmin feature) ─────────────────────
+get_user_timeout() {
+    local username="$1"
+    local default_minutes="$2"
+    
+    local overrides
+    overrides=$(get_config "timeout_overrides" "")
+    
+    if [[ -z "$overrides" ]]; then
+        echo "$default_minutes"
+        return
+    fi
+    
+    local max_override=0
+    local entries
+    # Parse the dict format: key1=val1 key2=val2 ...
+    entries=$(echo "$_config_cache" | grep "^timeout_overrides\." | cut -d= -f1-)
+    
+    while IFS='=' read -r k v; do
+        local entity="${k#timeout_overrides.}"
+        entity="${entity#\(}"; entity="${entity%\)}"
+        
+        if [[ "$entity" == "$username" ]] && [[ "$v" -gt "$max_override" ]]; then
+            max_override="$v"
+        fi
+        
+        if [[ "$entity" =~ ^@ ]]; then
+            local group="${entity#@}"
+            if groups "$username" 2>/dev/null | grep -qw "$group" && [[ "$v" -gt "$max_override" ]]; then
+                max_override="$v"
+            fi
+        fi
+    done <<< "$entries"
+    
+    # Use the HIGHER of default and override (MakeMeAdmin behavior)
+    if [[ "$max_override" -gt "$default_minutes" ]]; then
+        echo "$max_override"
+    else
+        echo "$default_minutes"
+    fi
+}
+
+# ── Renewal Limit Check (MakeMeAdmin feature) ───────────────────────────
+check_renewal_limit() {
+    local username="$1"
+    local max_renewals
+    max_renewals=$(get_config "max_renewals" "0")
+    
+    if [[ "$max_renewals" -eq 0 ]]; then
+        return 0  # No limit
+    fi
+    
+    local count_file="${STATE_DIR}/${username}.renewal_count"
+    local current_count=0
+    
+    if [[ -f "$count_file" ]]; then
+        current_count=$(cat "$count_file" 2>/dev/null || echo 0)
+    fi
+    
+    if [[ "$current_count" -ge "$max_renewals" ]]; then
+        log err "User '$username' has reached renewal limit ($max_renewals)"
+        echo "ERROR: Maximum renewal count reached ($max_renewals). Request a new grant."
+        exit 1
+    fi
+    
+    return 0
+}
+
+increment_renewal_count() {
+    local username="$1"
+    local count_file="${STATE_DIR}/${username}.renewal_count"
+    local current_count=0
+    [[ -f "$count_file" ]] && current_count=$(cat "$count_file" 2>/dev/null || echo 0)
+    echo $((current_count + 1)) > "$count_file"
+}
+
+clear_renewal_count() {
+    local username="$1"
+    rm -f "${STATE_DIR}/${username}.renewal_count"
 }
 
 # ── Validate username ──────────────────────────────────────────────────
@@ -388,6 +558,19 @@ cmd_grant() {
         echo "ERROR: Invalid duration. Must be a positive integer."
         exit 1
     fi
+
+    # NEW: Check entity authorization (SAP Privileges feature)
+    check_allowed_denied "$USERNAME"
+
+    # NEW: Apply per-user timeout override (MakeMeAdmin feature)
+    local default_minutes
+    default_minutes=$(get_config "default_duration" "30")
+    minutes=$(get_user_timeout "$USERNAME" "$minutes")
+    if [[ "$minutes" -eq 0 ]]; then
+        # 0 override = unlimited, skip max_duration check
+        minutes=525600  # 1 year, effectively unlimited
+        log info "User '$USERNAME' granted unlimited duration via override"
+    fi
     
     # Validate reason — if required and not provided, prompt interactively
     # This runs AFTER pkexec authentication (pkexec preserves /dev/tty)
@@ -415,6 +598,9 @@ cmd_grant() {
         log info "User '$USERNAME' already in sudo group"
         exit 0
     fi
+
+    # NEW: Clear renewal count on fresh grant
+    clear_renewal_count "$USERNAME"
 
     # Add to sudo group
     if usermod -a -G "$SUDO_GROUP" "$USERNAME" 2>/dev/null; then
@@ -550,6 +736,9 @@ cmd_renew() {
     
     validate_reason "$reason"
 
+    # NEW: Check renewal limit (MakeMeAdmin feature)
+    check_renewal_limit "$USERNAME"
+
     # Check if currently active
     if ! groups "$USERNAME" | grep -qw "$SUDO_GROUP"; then
         echo "NOT_ACTIVE"
@@ -575,6 +764,9 @@ cmd_renew() {
     fi
     
     atomic_write "${STATE_DIR}/${USERNAME}.expiry" "$new_expiry"
+
+    # NEW: Increment renewal counter
+    increment_renewal_count "$USERNAME"
     
     local log_msg="RENEW: user='$USERNAME' minutes=$minutes expiry=$new_expiry"
     if [[ -n "$reason" ]]; then

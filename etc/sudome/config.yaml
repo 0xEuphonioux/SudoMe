@@ -1,9 +1,15 @@
-# SudoMe Configuration
+# SudoMe Configuration v2.2.0
 # /etc/sudome/config.yaml
 #
 # Enterprise configuration for SudoMe — temporary sudo privilege
 # elevation with automatic revocation, audit logging, and SIEM integration.
-# Mirrors SAP Privileges configuration profile capabilities.
+#
+# NEW in v2.2 (from SAP Privileges + MakeMeAdmin cross-pollination):
+#   - Denied entities + per-trigger exclusions
+#   - Enforced policy settings (override preferences)
+#   - Per-user / per-group timeout overrides
+#   - Renewal limit
+#   - Parent process validation
 
 # ── Timing ─────────────────────────────────────────────────────────────
 # Default duration for sudo grants (minutes)
@@ -15,6 +21,36 @@ max_duration: 480
 # How often the daemon checks for expired grants (seconds)
 daemon_check_interval: 30
 
+# ── Allowed / Denied Entities (SAP Privileges feature) ─────────────────
+# Users and groups explicitly allowed to request sudo elevation.
+# If set, ONLY these entities can elevate. If empty/null, all users can elevate.
+# Format: usernames or group names (prefix groups with @)
+# allowed_entities:
+#   - "@domain_admins"
+#   - "@helpdesk_staff"
+#   - "svc_emergency"
+
+# Users and groups explicitly denied from requesting sudo elevation.
+# These override the allowed list — if a user is in BOTH, they are DENIED.
+# denied_entities:
+#   - "temp_intern"
+#   - "@contractors"
+#   - "svc_automation"
+
+# ── Per-User / Per-Group Timeout Overrides (MakeMeAdmin feature) ───────
+# Override default_duration for specific users or groups.
+# Keys are usernames or @groupnames. Values are minutes.
+# The HIGHER of the user override and default_duration is used.
+# timeout_overrides:
+#   "@senior_admins": 240
+#   "@helpdesk_l2": 120
+#   "emergency_admin": 0    # 0 = unlimited (overrides max_duration)
+
+# ── Renewal Limits (MakeMeAdmin feature) ──────────────────────────────
+# Maximum number of times a user can renew their sudo grant per session.
+# 0 = unlimited renewals. Reset on next grant request.
+max_renewals: 3
+
 # ── Auto-Revocation Exclusions ─────────────────────────────────────────
 # Users excluded from ALL automatic revocation (service accounts,
 # emergency admin accounts, backup operators). These users will
@@ -23,6 +59,19 @@ daemon_check_interval: 30
 #   - svc_backup
 #   - svc_ci_runner
 #   - emergency_admin
+
+# Per-trigger exclusion overrides (SAP Privileges feature).
+# Allows excluding specific users from SPECIFIC auto-revoke triggers
+# without excluding them from all triggers.
+# auto_revoke_exclusions:
+#   screen_lock_excluded:
+#     - monitoring_user       # Don't revoke on screen lock
+#   sleep_excluded:
+#     - monitoring_user       # Don't revoke on sleep
+#   time_change_excluded:
+#     - svc_ntp_sync          # Don't revoke on NTP time sync
+#   shutdown_excluded:
+#     - emergency_admin       # Don't revoke on shutdown
 
 # ── Behavior ───────────────────────────────────────────────────────────
 # Automatically revoke sudo at user logout
@@ -59,6 +108,18 @@ reason_max_length: 256
 
 # Enforce preset list strictly (user cannot type custom reason)
 reason_strict_presets: false
+
+# ── Parent Process Validation (SAP Privileges feature) ──────────────────
+# Restrict which parent processes can request sudo elevation.
+# Validates that the calling process (or its ancestor) matches an allowed
+# binary path. Prevents malicious scripts from calling sudome.
+# If empty, no validation is performed (all callers allowed).
+# allowed_parent_processes:
+#   - "/usr/bin/sudome"          # CLI
+#   - "/usr/bin/sudome-gui"      # GUI
+#   - "/usr/lib/sudome/sudome-daemon"  # Daemon
+#   - "/usr/bin/bash"            # Direct bash usage
+#   - "/usr/bin/zsh"             # Direct zsh usage
 
 # ── Post-Change Actions ────────────────────────────────────────────────
 # Path to executable/script run after every grant or revoke.
@@ -97,6 +158,12 @@ webhook_timeout: 10
 # Log all grant/revoke events to syslog
 log_to_syslog: true
 
+# Log elevated processes (sudo commands) executed by users with
+# active grants. Mirrors MakeMeAdmin's elevated process logging.
+# When enabled, every sudo command is audited with username, PID,
+# timestamp, and command details sent to syslog.
+log_elevated_processes: false
+
 # Syslog facility
 syslog_facility: "auth"
 
@@ -122,3 +189,13 @@ show_tray_icon: true
 
 # Show remaining time in tray icon
 show_tray_timer: true
+
+# ── Enforced Policy Settings (SAP Privileges MDM feature) ──────────────
+# Settings placed under /etc/sudome/policy.yaml are ENFORCED and
+# override preferences in config.yaml. This allows centralized
+# IT management via Ansible/Puppet/Chef without users being able
+# to override critical security settings.
+#
+# Create /etc/sudome/policy.yaml with the same structure as config.yaml.
+# Any key present in policy.yaml takes precedence over config.yaml.
+# Policy file is read-only to users (chmod 644 root:root).
